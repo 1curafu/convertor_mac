@@ -237,10 +237,10 @@ enum Spreadsheet {
         var sheetEntries = ""
         var relEntries = ""
         for (index, sheet) in workbook.sheets.enumerated() {
-            let number = index + 1
-            overrides += "<Override PartName=\"/xl/worksheets/sheet\(number).xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
-            sheetEntries += "<sheet name=\"\(sheetName(sheet.name, index: index).xmlEscaped)\" sheetId=\"\(number)\" r:id=\"rId\(number)\"/>"
-            relEntries += "<Relationship Id=\"rId\(number)\" Type=\"\(rel)/worksheet\" Target=\"worksheets/sheet\(number).xml\"/>"
+            let sheetNumber = index + 1
+            overrides += "<Override PartName=\"/xl/worksheets/sheet\(sheetNumber).xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
+            sheetEntries += "<sheet name=\"\(sheetName(sheet.name, index: index).xmlEscaped)\" sheetId=\"\(sheetNumber)\" r:id=\"rId\(sheetNumber)\"/>"
+            relEntries += "<Relationship Id=\"rId\(sheetNumber)\" Type=\"\(rel)/worksheet\" Target=\"worksheets/sheet\(sheetNumber).xml\"/>"
 
             var data = header + "<worksheet xmlns=\"\(ns)\"><sheetData>"
             for (r, row) in sheet.rows.enumerated() {
@@ -256,7 +256,7 @@ enum Spreadsheet {
                 data += "</row>"
             }
             data += "</sheetData></worksheet>"
-            files.append(("xl/worksheets/sheet\(number).xml", data.utf8Data))
+            files.append(("xl/worksheets/sheet\(sheetNumber).xml", data.utf8Data))
         }
 
         files.append(("[Content_Types].xml", (header + """
