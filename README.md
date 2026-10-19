@@ -11,7 +11,7 @@ Results are saved next to the original (configurable in Settings). Nothing leave
 | ⌃ Control | **Actions**: AirDrop, Copy, Copy Path, Move, Float, Terminal |
 
 Tap another key while the wheel is open to switch wheels. Drop on the centre to cancel.
-The menu bar window also has a drop zone with the same options.
+The menu bar window also has a drop zone with the same options. See the [user guide](docs/GUIDE.md) for every tool.
 
 ## Formats
 
