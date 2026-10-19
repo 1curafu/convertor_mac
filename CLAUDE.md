@@ -1,7 +1,8 @@
 # Convertor: notes for Claude Code
 
 A macOS 26 menu bar app (SwiftUI + AppKit, Swift package) that clones Tangerine: drag a file, tap
-⇧/⌘/⌃ mid-drag, drop on a wheel segment to convert, edit or act on it. See README.md for features.
+⇧/⌘/⌃ mid-drag, drop on a wheel segment to convert, edit or act on it. README.md is the user guide;
+docs/DEVELOPMENT.md covers build options, architecture and tests.
 
 ## Build and test
 
