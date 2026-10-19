@@ -1,0 +1,21 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build app bundle (with ffmpeg)
+        run: scripts/build_app.sh
+      - name: Check bundled ffmpeg has the encoders we use
+        run: |
+          FF=build/Convertor.app/Contents/MacOS/ffmpeg
+          $FF -hide_banner -encoders > encoders.txt
+          for enc in libx264 libmp3lame libvorbis libopus libvpx-vp9 libwebp wmav2 wmv2 flac; do
+            grep -q " $enc " encoders.txt && echo "✓ $enc" || { echo "✗ $enc missing"; exit 1; }
+          done
+          grep -E "av1|aom" encoders.txt || echo "no AV1 encoder (AVIF output unavailable)"

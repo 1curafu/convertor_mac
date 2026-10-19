@@ -20,11 +20,13 @@ struct ConvertorApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let dragMonitor = DragMonitor()
+    private var dragMonitor: DragMonitor?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Prefs.registerDefaults()
         NSApp.setActivationPolicy(.accessory)
-        dragMonitor.start()
+        let monitor = DragMonitor()
+        monitor.start()
+        dragMonitor = monitor
     }
 }
