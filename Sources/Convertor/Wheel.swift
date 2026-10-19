@@ -25,9 +25,11 @@ final class WheelModel: ObservableObject {
 
     func load(_ urls: [URL], mode: Mode) {
         self.urls = urls
-        icon = urls.count == 1
-            ? NSWorkspace.shared.icon(forFile: urls[0].path)
-            : NSWorkspace.shared.icon(forFiles: urls.map(\.path))
+        let workspace = NSWorkspace.shared
+        let icon: NSImage? = urls.count == 1
+            ? workspace.icon(forFile: urls[0].path)
+            : workspace.icon(forFiles: urls.map(\.path))
+        self.icon = icon ?? NSImage()
         hovered = nil
         self.mode = mode
         actions = Catalog.actions(for: urls, mode: mode)
@@ -75,7 +77,7 @@ struct RingSegment: Shape {
 
         func point(_ radius: CGFloat, _ degrees: Double) -> CGPoint {
             let radians = degrees * .pi / 180
-            return CGPoint(x: center.x + radius * cos(radians), y: center.y + radius * sin(radians))
+            return CGPoint(x: center.x + radius * CGFloat(cos(radians)), y: center.y + radius * CGFloat(sin(radians)))
         }
 
         var path = Path()
@@ -138,7 +140,7 @@ struct WheelView: View {
                     .overlay(RingSegment(index: index, count: count).stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
 
                 SegmentLabel(action: action, active: active)
-                    .position(x: side / 2 + labelRadius * cos(radians), y: side / 2 + labelRadius * sin(radians))
+                    .position(x: side / 2 + labelRadius * CGFloat(cos(radians)), y: side / 2 + labelRadius * CGFloat(sin(radians)))
                     .scaleEffect(active ? 1.08 : 1)
             }
 

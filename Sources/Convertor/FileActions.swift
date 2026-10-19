@@ -88,7 +88,7 @@ private struct FloatView: View {
     let url: URL
 
     var body: some View {
-        Image(nsImage: NSImage(contentsOf: url) ?? NSWorkspace.shared.icon(forFile: url.path))
+        Image(nsImage: NSImage(contentsOf: url) ?? (NSWorkspace.shared.icon(forFile: url.path) as NSImage?) ?? NSImage())
             .resizable()
             .scaledToFit()
             .padding(12)
