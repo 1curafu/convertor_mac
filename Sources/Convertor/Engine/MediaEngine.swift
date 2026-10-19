@@ -97,16 +97,13 @@ enum MediaEngine {
         guard let session = AVAssetExportSession(asset: asset, presetName: preset) else {
             throw ConvertError("This file can't be exported with AVFoundation")
         }
-        session.outputURL = url
-        session.outputFileType = type
-        session.shouldOptimizeForNetworkUse = true
         if let pitch { session.audioTimePitchAlgorithm = pitch }
-        await withCheckedContinuation { continuation in
-            session.exportAsynchronously { continuation.resume() }
-        }
-        guard session.status == .completed else {
+        session.shouldOptimizeForNetworkUse = true
+        do {
+            try await session.export(to: url, as: type)
+        } catch {
             try? FileManager.default.removeItem(at: url)
-            throw ConvertError(session.error?.localizedDescription ?? "Export failed")
+            throw ConvertError(error.localizedDescription)
         }
     }
 

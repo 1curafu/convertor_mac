@@ -437,10 +437,17 @@ enum ImageEdits {
         let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
         let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
         let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any] ?? [:]
-        m.title = tiff[kCGImagePropertyTIFFImageDescription] as? String ?? ""
-        m.author = tiff[kCGImagePropertyTIFFArtist] as? String ?? ""
-        m.copyright = tiff[kCGImagePropertyTIFFCopyright] as? String ?? ""
-        m.comment = exif[kCGImagePropertyExifUserComment] as? String ?? ""
+        // PNG and others keep these in XMP rather than TIFF/EXIF fields, so check both.
+        let xmp = CGImageSourceCopyMetadataAtIndex(source, 0, nil)
+        func text(_ dictionary: CFString, _ key: CFString, _ value: Any?) -> String {
+            if let value = value as? String, !value.isEmpty { return value }
+            guard let xmp, let tag = CGImageMetadataCopyTagMatchingImageProperty(xmp, dictionary, key) else { return "" }
+            return xmpString(CGImageMetadataTagCopyValue(tag)) ?? ""
+        }
+        m.title = text(kCGImagePropertyTIFFDictionary, kCGImagePropertyTIFFImageDescription, tiff[kCGImagePropertyTIFFImageDescription])
+        m.author = text(kCGImagePropertyTIFFDictionary, kCGImagePropertyTIFFArtist, tiff[kCGImagePropertyTIFFArtist])
+        m.copyright = text(kCGImagePropertyTIFFDictionary, kCGImagePropertyTIFFCopyright, tiff[kCGImagePropertyTIFFCopyright])
+        m.comment = text(kCGImagePropertyExifDictionary, kCGImagePropertyExifUserComment, exif[kCGImagePropertyExifUserComment])
         m.date = exif[kCGImagePropertyExifDateTimeOriginal] as? String ?? ""
         m.camera = [tiff[kCGImagePropertyTIFFMake] as? String, tiff[kCGImagePropertyTIFFModel] as? String, exif[kCGImagePropertyExifLensModel] as? String]
             .compactMap { $0 }.joined(separator: " · ")
@@ -449,6 +456,20 @@ enum ImageEdits {
             m.longitude = String(format: "%.6f", (gps[kCGImagePropertyGPSLongitudeRef] as? String) == "W" ? -lon : lon)
         }
         return m
+    }
+
+    /// XMP values are strings, arrays of tags (dc:creator) or language alternatives (dc:title).
+    private static func xmpString(_ value: CFTypeRef?) -> String? {
+        guard let value else { return nil }
+        if let string = value as? String { return string }
+        if CFGetTypeID(value) == CGImageMetadataTagGetTypeID() {
+            return xmpString(CGImageMetadataTagCopyValue(unsafeDowncast(value, to: CGImageMetadataTag.self)))
+        }
+        if let array = value as? [AnyObject] { return array.lazy.compactMap { xmpString($0) }.first }
+        if let dictionary = value as? [String: AnyObject] {
+            return xmpString(dictionary["x-default"]) ?? dictionary.values.lazy.compactMap { xmpString($0) }.first
+        }
+        return nil
     }
 
     /// Rewrites the tags without re-encoding pixels where ImageIO allows it (JPEG, PNG, TIFF, HEIC).

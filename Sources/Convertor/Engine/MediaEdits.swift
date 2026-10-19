@@ -49,14 +49,13 @@ enum MediaEdits {
             guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) else {
                 throw ConvertError("Can't cut this file")
             }
-            session.outputURL = out
-            session.outputFileType = MediaEngine.fileType(for: ext)
             session.timeRange = CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600),
                                             end: CMTime(seconds: end, preferredTimescale: 600))
-            await withCheckedContinuation { continuation in session.exportAsynchronously { continuation.resume() } }
-            guard session.status == .completed else {
+            do {
+                try await session.export(to: out, as: MediaEngine.fileType(for: ext))
+            } catch {
                 try? FileManager.default.removeItem(at: out)
-                throw ConvertError(session.error?.localizedDescription ?? "Cutting failed")
+                throw ConvertError(error.localizedDescription)
             }
             return
         }

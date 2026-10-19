@@ -1,5 +1,17 @@
 import AppKit
 
+/// Fonts for generated documents. The system UI font has a private name (".SFNS…") that
+/// Word and Pages can't resolve, so documents use Helvetica Neue instead.
+enum DocumentFont {
+    static func regular(_ size: CGFloat) -> NSFont {
+        NSFont(name: "Helvetica Neue", size: size) ?? NSFont(name: "Helvetica", size: size) ?? .systemFont(ofSize: size)
+    }
+
+    static func bold(_ size: CGFloat) -> NSFont {
+        NSFontManager.shared.convert(regular(size), toHaveTrait: .boldFontMask)
+    }
+}
+
 /// Headings and paragraphs with bold/italic runs: the common ground between rich text,
 /// Markdown, EPUB chapters and text pulled out of PDFs.
 struct StructuredText {
@@ -170,11 +182,11 @@ struct StructuredText {
             style.paragraphSpacing = heading ? 6 : 8
             style.paragraphSpacingBefore = heading ? 10 : 0
             for run in runs {
-                var font = NSFont.systemFont(ofSize: size, weight: heading || run.bold ? .bold : .regular)
+                var font = heading || run.bold ? DocumentFont.bold(size) : DocumentFont.regular(size)
                 if run.italic { font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) }
                 result.append(NSAttributedString(string: run.text, attributes: [.font: font, .paragraphStyle: style]))
             }
-            result.append(NSAttributedString(string: "\n", attributes: [.font: NSFont.systemFont(ofSize: size), .paragraphStyle: style]))
+            result.append(NSAttributedString(string: "\n", attributes: [.font: DocumentFont.regular(size), .paragraphStyle: style]))
         }
         return result
     }

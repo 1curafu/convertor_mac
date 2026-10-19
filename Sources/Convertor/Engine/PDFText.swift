@@ -16,7 +16,7 @@ enum PDFText {
             } else if let image = render(page, dpi: 200) {
                 let paragraphs = ocr(image)
                 let body = paragraphs.isEmpty ? selectable : paragraphs.joined(separator: "\n")
-                pages.append(NSAttributedString(string: body, attributes: [.font: NSFont.systemFont(ofSize: 12)]))
+                pages.append(NSAttributedString(string: body, attributes: [.font: DocumentFont.regular(12)]))
             }
         }
         return pages
@@ -27,7 +27,7 @@ enum PDFText {
         let result = NSMutableAttributedString()
         for page in await pages(document) {
             result.append(page)
-            result.append(NSAttributedString(string: "\n\n", attributes: [.font: NSFont.systemFont(ofSize: 12)]))
+            result.append(NSAttributedString(string: "\n\n", attributes: [.font: DocumentFont.regular(12)]))
         }
         return result
     }

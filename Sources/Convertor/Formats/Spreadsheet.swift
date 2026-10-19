@@ -327,10 +327,10 @@ enum Spreadsheet {
     /// Each sheet as a bordered table, for PDF export.
     private static func attributedTables(_ workbook: Workbook) -> NSAttributedString {
         let result = NSMutableAttributedString()
-        let font = NSFont.systemFont(ofSize: 9)
+        let font = DocumentFont.regular(9)
         for sheet in workbook.sheets {
             if workbook.sheets.count > 1 {
-                result.append(NSAttributedString(string: sheet.name + "\n", attributes: [.font: NSFont.boldSystemFont(ofSize: 13)]))
+                result.append(NSAttributedString(string: sheet.name + "\n", attributes: [.font: DocumentFont.bold(13)]))
             }
             let columns = max(1, sheet.rows.map(\.count).max() ?? 1)
             let table = NSTextTable()
@@ -347,7 +347,7 @@ enum Spreadsheet {
                     style.textBlocks = [block]
                     let value = c < row.count ? row[c] : ""
                     result.append(NSAttributedString(string: value + "\n", attributes: [
-                        .font: r == 0 ? NSFont.boldSystemFont(ofSize: 9) : font, .paragraphStyle: style,
+                        .font: r == 0 ? DocumentFont.bold(9) : font, .paragraphStyle: style,
                     ]))
                 }
             }
