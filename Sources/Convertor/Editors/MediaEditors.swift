@@ -426,8 +426,15 @@ struct SpeedEditor: View {
     }
 
     private func save() {
-        let url = context.url, factor = factor, audio = session.info.hasAudio
-        context.save("Speed \(label(factor))") { [try await MediaEdits.speed(url, factor: factor, hasAudio: audio)] }
+        let urls = context.urls, factor = factor
+        context.save("Speed \(label(factor))") {
+            var outputs: [URL] = []
+            for url in urls {
+                let audio = await Media.probe(url).hasAudio
+                outputs.append(try await MediaEdits.speed(url, factor: factor, hasAudio: audio))
+            }
+            return outputs
+        }
     }
 }
 
@@ -505,8 +512,12 @@ struct VisualizeEditor: View {
     }
 
     private func save() {
-        let url = context.url, canvas = canvas, style = style, hex = color.hex, image = image
-        context.save("Visualize") { [try await MediaEdits.visualize(url, canvas: canvas, style: style, color: hex, image: image)] }
+        let urls = context.urls, canvas = canvas, style = style, hex = color.hex, image = image
+        context.save("Visualize") {
+            var outputs: [URL] = []
+            for url in urls { outputs.append(try await MediaEdits.visualize(url, canvas: canvas, style: style, color: hex, image: image)) }
+            return outputs
+        }
     }
 }
 
@@ -543,8 +554,12 @@ struct ChannelsEditor: View {
     }
 
     private func save() {
-        let url = context.url, mono = mono
-        context.save(mono ? "Mono" : "Stereo") { [try await MediaEdits.channels(url, mono: mono)] }
+        let urls = context.urls, mono = mono
+        context.save(mono ? "Mono" : "Stereo") {
+            var outputs: [URL] = []
+            for url in urls { outputs.append(try await MediaEdits.channels(url, mono: mono)) }
+            return outputs
+        }
     }
 }
 

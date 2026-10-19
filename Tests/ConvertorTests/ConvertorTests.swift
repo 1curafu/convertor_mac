@@ -264,6 +264,92 @@ final class ConvertorTests: XCTestCase {
         }
     }
 
+    // MARK: Review regressions
+
+    func testSelectionsOnlyOfferSelectionTools() {
+        let images = [URL(fileURLWithPath: "/tmp/a.png"), URL(fileURLWithPath: "/tmp/b.png")]
+        let tools = Catalog.actions(for: images, mode: .tools).map(\.title)
+        XCTAssertFalse(tools.contains("Annotate") || tools.contains("Redact"), "\(tools)")
+        XCTAssertTrue(tools.contains("Edit") && tools.contains("Crop") && tools.contains("Collage"), "\(tools)")
+        let videos = [URL(fileURLWithPath: "/tmp/a.mov"), URL(fileURLWithPath: "/tmp/b.mov")]
+        let videoTools = Catalog.actions(for: videos, mode: .tools).map(\.title)
+        XCTAssertFalse(videoTools.contains("Trim") || videoTools.contains("Crop") || videoTools.contains("Split"), "\(videoTools)")
+        XCTAssertTrue(videoTools.contains("Join"), "\(videoTools)")
+    }
+
+    func testZipAcrossFolders() async throws {
+        let left = file("left"), right = file("right")
+        try FileManager.default.createDirectory(at: left, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: right, withIntermediateDirectories: true)
+        let a = left.appendingPathComponent("same.txt"), b = right.appendingPathComponent("same.txt")
+        try "a".write(to: a, atomically: true, encoding: .utf8)
+        try "b".write(to: b, atomically: true, encoding: .utf8)
+        let archive = try await ArchiveEngine.pack([a, b], as: "zip")
+        let folder = try await ArchiveEngine.extract(archive)
+        let names = try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted()
+        XCTAssertEqual(names, ["same 2.txt", "same.txt"])
+    }
+
+    func testODSKeepsColumnsAndRowsAfterLargeGaps() async throws {
+        let content = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" \
+        xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">\
+        <office:body><office:spreadsheet><table:table table:name="Gaps">\
+        <table:table-row><table:table-cell><text:p>A</text:p></table:table-cell>\
+        <table:table-cell table:number-columns-repeated="100"/><table:table-cell><text:p>far</text:p></table:table-cell>\
+        <table:table-cell table:number-columns-repeated="16000"/></table:table-row>\
+        <table:table-row table:number-rows-repeated="200"><table:table-cell/></table:table-row>\
+        <table:table-row><table:table-cell><text:p>below</text:p></table:table-cell></table:table-row>\
+        <table:table-row table:number-rows-repeated="1048000"><table:table-cell/></table:table-row>\
+        </table:table></office:spreadsheet></office:body></office:document-content>
+        """
+        let ods = file("gaps.ods")
+        try await ZipPackage.write([("mimetype", "application/vnd.oasis.opendocument.spreadsheet".utf8Data),
+                                    ("content.xml", content.utf8Data)], to: ods, storedFirst: "mimetype")
+        let rows = try await Spreadsheet.read(ods).sheets[0].rows
+        XCTAssertEqual(rows[0].count, 102)
+        XCTAssertEqual(rows[0][101], "far")
+        XCTAssertEqual(rows.count, 202)
+        XCTAssertEqual(rows[201], ["below"])
+    }
+
+    func testAnimatedGIFKeepsFramesWhenStripped() throws {
+        let gif = file("anim.gif")
+        let destination = CGImageDestinationCreateWithURL(gif as CFURL, "com.compuserve.gif" as CFString, 3, nil)!
+        for index in 0..<3 {
+            let ctx = CGContext(data: nil, width: 40, height: 40, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            ctx.setFillColor(CGColor(srgbRed: CGFloat(index) / 2, green: 0.2, blue: 0.4, alpha: 1))
+            ctx.fill(CGRect(x: 0, y: 0, width: 40, height: 40))
+            CGImageDestinationAddImage(destination, ctx.makeImage()!,
+                                       [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.2]] as CFDictionary)
+        }
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let clean = try ImageEdits.stripMetadata(gif)
+        XCTAssertEqual(CGImageSourceGetCount(CGImageSourceCreateWithURL(clean as CFURL, nil)!), 3)
+    }
+
+    func testWebPRespectsEXIFOrientation() async throws {
+        try XCTSkipUnless(FFmpeg.isAvailable, "ffmpeg not available")
+        let png = try makePNG("rotated-source.png", width: 640, height: 480)
+        let (image, _) = try ImageEngine.load(png)
+        let jpg = file("rotated.jpg")
+        let destination = CGImageDestinationCreateWithURL(jpg as CFURL, "public.jpeg" as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, image, [kCGImagePropertyOrientation: 6] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+
+        let webp = try await ImageEngine.convert(jpg, to: "webp")
+        let (converted, _) = try ImageEngine.load(webp)
+        XCTAssertEqual(converted.width, 480, "portrait photo stays portrait")
+        XCTAssertEqual(converted.height, 640)
+
+        var metadata = ImageEdits.readMetadata(webp)
+        metadata.author = "WebP"
+        let tagged = try await EditJobs.imageMetadata(webp, metadata, removeLocation: false)[0]
+        XCTAssertEqual(ImageEdits.readMetadata(tagged).author, "WebP", "unwritable formats fall back to a re-encode")
+    }
+
     // MARK: Audio & video (needs ffmpeg)
 
     func testMediaConversions() async throws {

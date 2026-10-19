@@ -12,9 +12,7 @@ enum Media {
         var height = 0
     }
 
-    static func isAppleReadable(_ url: URL) -> Bool {
-        ["mp4", "mov", "m4v", "m4a", "wav", "aiff", "caf", "mp3", "aac"].contains(Catalog.normalize(url))
-    }
+    static func isAppleReadable(_ url: URL) -> Bool { MediaEngine.appleReadable(url) }
 
     static func probe(_ url: URL) async -> Info {
         var info = Info()

@@ -89,7 +89,7 @@ enum PDFText {
             let startsList = after.hasPrefix("•") || after.hasPrefix("- ") || after.first?.isNumber == true && after.dropFirst().first == "."
             if startsList { continue }
 
-            if before.hasSuffix("-"), after.first?.isLowercase == true, item.offset > 0 {
+            if item.before.hasSuffix("-"), after.first?.isLowercase == true, item.offset > 0 {
                 result.replaceCharacters(in: NSRange(location: item.offset - 1, length: 2), with: "")
                 continue
             }

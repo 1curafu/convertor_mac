@@ -23,8 +23,25 @@ enum ArchiveEngine {
         let out = urls.count == 1
             ? Output.file(for: first, ext: ext)
             : Output.unique(Output.directory(for: first), name: "Archive", ext: ext)
-        // Items are passed relative to their folder so the archive has no absolute paths.
-        try await archive(urls.map(\.lastPathComponent), in: first.deletingLastPathComponent(), to: out, ext: ext)
+
+        // Items are passed relative to one folder so the archive has no absolute paths.
+        // A selection spanning several folders (search results, Recents) is gathered into one first.
+        let parents = Set(urls.map { $0.deletingLastPathComponent().standardizedFileURL.path })
+        if parents.count == 1 {
+            try await archive(urls.map(\.lastPathComponent), in: first.deletingLastPathComponent(), to: out, ext: ext)
+        } else {
+            let staging = try Output.temporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: staging) }
+            var names: [String] = []
+            for url in urls {
+                let fileExt = url.pathExtension
+                let name = fileExt.isEmpty ? url.lastPathComponent : url.deletingPathExtension().lastPathComponent
+                let target = Output.unique(staging, name: name, ext: fileExt.isEmpty ? nil : fileExt)
+                try FileManager.default.copyItem(at: url, to: target)
+                names.append(target.lastPathComponent)
+            }
+            try await archive(names, in: staging, to: out, ext: ext)
+        }
         return out
     }
 
@@ -66,5 +83,6 @@ enum ArchiveEngine {
             try? FileManager.default.removeItem(at: out)
             throw error
         }
+        guard FileManager.default.fileExists(atPath: out.path) else { throw ConvertError("Couldn't create the archive") }
     }
 }

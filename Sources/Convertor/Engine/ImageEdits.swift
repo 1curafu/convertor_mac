@@ -2,6 +2,7 @@ import AppKit
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import ImageIO
+import UniformTypeIdentifiers
 import Vision
 
 /// A colour that can cross between SwiftUI previews and Core Graphics rendering.
@@ -39,6 +40,8 @@ struct RGBA: Hashable {
 /// Pixel operations behind the image editors. All rectangles and points are normalised
 /// (0…1, origin top-left) so the same values drive the on-screen preview and the export.
 enum ImageEdits {
+    /// Creating a CIContext is expensive; one shared, thread-safe context serves every render.
+    static let ciContext = CIContext()
     // MARK: Crop
 
     static func crop(_ image: CGImage, rect: CGRect, outputSize: CGSize?) throws -> CGImage {
@@ -214,7 +217,7 @@ enum ImageEdits {
             }
             output = cover.cropped(to: rect).composited(over: output)
         }
-        guard let result = CIContext().createCGImage(output, from: base.extent) else { throw ConvertError("Couldn't redact the image") }
+        guard let result = ciContext.createCGImage(output, from: base.extent) else { throw ConvertError("Couldn't redact the image") }
         return result
     }
 
@@ -338,7 +341,7 @@ enum ImageEdits {
     }
 
     static func render(_ image: CIImage) throws -> CGImage {
-        guard let result = CIContext().createCGImage(image, from: image.extent) else { throw ConvertError("Couldn't render the image") }
+        guard let result = ciContext.createCGImage(image, from: image.extent) else { throw ConvertError("Couldn't render the image") }
         return result
     }
 
@@ -479,84 +482,117 @@ enum ImageEdits {
         return nil
     }
 
-    /// Rewrites the tags without re-encoding pixels where ImageIO allows it (JPEG, PNG, TIFF, HEIC).
+    /// Rewrites the tags without re-encoding pixels where ImageIO allows it (JPEG, PNG, TIFF, HEIC);
+    /// otherwise re-encodes at full quality (into PNG when ImageIO can't write the source format).
     static func writeMetadata(_ url: URL, _ m: Metadata, removeLocation: Bool) throws -> URL {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let type = CGImageSourceGetType(source) else {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), CGImageSourceGetCount(source) > 0 else {
             throw ConvertError("Can't read \(url.lastPathComponent)")
         }
-        let out = Output.file(for: url, suffix: " edited", ext: url.pathExtension.lowercased())
-        let tags = CGImageMetadataCreateMutable()
-        func set(_ dictionary: CFString, _ key: CFString, _ value: Any) {
-            CGImageMetadataSetValueMatchingImageProperty(tags, dictionary, key, value as CFTypeRef)
-        }
-        set(kCGImagePropertyTIFFDictionary, kCGImagePropertyTIFFImageDescription, m.title)
-        set(kCGImagePropertyTIFFDictionary, kCGImagePropertyTIFFArtist, m.author)
-        set(kCGImagePropertyTIFFDictionary, kCGImagePropertyTIFFCopyright, m.copyright)
-        set(kCGImagePropertyExifDictionary, kCGImagePropertyExifUserComment, m.comment)
-        if !m.date.isEmpty { set(kCGImagePropertyExifDictionary, kCGImagePropertyExifDateTimeOriginal, m.date) }
-        if !removeLocation, let lat = Double(m.latitude), let lon = Double(m.longitude) {
-            set(kCGImagePropertyGPSDictionary, kCGImagePropertyGPSLatitude, abs(lat))
-            set(kCGImagePropertyGPSDictionary, kCGImagePropertyGPSLatitudeRef, lat < 0 ? "S" : "N")
-            set(kCGImagePropertyGPSDictionary, kCGImagePropertyGPSLongitude, abs(lon))
-            set(kCGImagePropertyGPSDictionary, kCGImagePropertyGPSLongitudeRef, lon < 0 ? "W" : "E")
-        }
+        let latitude = Double(m.latitude), longitude = Double(m.longitude)
 
-        guard let destination = CGImageDestinationCreateWithURL(out as CFURL, type, 1, nil) else {
-            throw ConvertError("Can't write \(url.pathExtension.uppercased()) files")
-        }
-        let options: [CFString: Any] = [
-            kCGImageDestinationMetadata: tags,
-            kCGImageDestinationMergeMetadata: true,
-            kCGImageMetadataShouldExcludeGPS: removeLocation,
-        ]
-        if CGImageDestinationCopyImageSource(destination, source, options as CFDictionary, nil) {
-            // Keep the lossless copy only if the tags actually landed (not every format takes XMP).
-            let written = readMetadata(out)
-            if written.title == m.title, written.author == m.author, written.copyright == m.copyright,
-               !removeLocation || written.latitude.isEmpty {
-                return out
+        if let type = CGImageSourceGetType(source) {
+            let out = Output.file(for: url, suffix: " edited", ext: url.pathExtension.lowercased())
+            // Start from the file's own metadata so nothing else is lost, then replace (not merge)
+            // so stale EXIF values can't win over the edited ones.
+            let tags = CGImageSourceCopyMetadataAtIndex(source, 0, nil).flatMap { CGImageMetadataCreateMutableCopy($0) }
+                ?? CGImageMetadataCreateMutable()
+            func set(_ dictionary: CFString, _ key: CFString, _ value: Any) {
+                CGImageMetadataSetValueMatchingImageProperty(tags, dictionary, key, value as CFTypeRef)
             }
+            set(kCGImagePropertyTIFFDictionary, kCGImagePropertyTIFFImageDescription, m.title)
+            set(kCGImagePropertyTIFFDictionary, kCGImagePropertyTIFFArtist, m.author)
+            set(kCGImagePropertyTIFFDictionary, kCGImagePropertyTIFFCopyright, m.copyright)
+            set(kCGImagePropertyExifDictionary, kCGImagePropertyExifUserComment, m.comment)
+            if !m.date.isEmpty { set(kCGImagePropertyExifDictionary, kCGImagePropertyExifDateTimeOriginal, m.date) }
+            if !removeLocation, let latitude, let longitude {
+                set(kCGImagePropertyGPSDictionary, kCGImagePropertyGPSLatitude, abs(latitude))
+                set(kCGImagePropertyGPSDictionary, kCGImagePropertyGPSLatitudeRef, latitude < 0 ? "S" : "N")
+                set(kCGImagePropertyGPSDictionary, kCGImagePropertyGPSLongitude, abs(longitude))
+                set(kCGImagePropertyGPSDictionary, kCGImagePropertyGPSLongitudeRef, longitude < 0 ? "W" : "E")
+            }
+            if let destination = CGImageDestinationCreateWithURL(out as CFURL, type, CGImageSourceGetCount(source), nil) {
+                let options: [CFString: Any] = [kCGImageDestinationMetadata: tags, kCGImageMetadataShouldExcludeGPS: removeLocation]
+                // Keep the lossless copy only if every edited tag actually landed.
+                if CGImageDestinationCopyImageSource(destination, source, options as CFDictionary, nil),
+                   matches(readMetadata(out), m, removeLocation: removeLocation) {
+                    return out
+                }
+            }
+            try? FileManager.default.removeItem(at: out)
         }
 
-        // Re-encode at full quality with the tags in every dictionary the format might use.
-        try? FileManager.default.removeItem(at: out)
-        let (image, props) = try ImageEngine.load(url)
-        var merged = props
-        var tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
-        tiff[kCGImagePropertyTIFFImageDescription] = m.title
-        tiff[kCGImagePropertyTIFFArtist] = m.author
-        tiff[kCGImagePropertyTIFFCopyright] = m.copyright
-        merged[kCGImagePropertyTIFFDictionary] = tiff
-        var exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
-        exif[kCGImagePropertyExifUserComment] = m.comment
-        if !m.date.isEmpty { exif[kCGImagePropertyExifDateTimeOriginal] = m.date }
-        merged[kCGImagePropertyExifDictionary] = exif
-        var png = props[kCGImagePropertyPNGDictionary] as? [CFString: Any] ?? [:]
-        png[kCGImagePropertyPNGTitle] = m.title
-        png[kCGImagePropertyPNGAuthor] = m.author
-        png[kCGImagePropertyPNGCopyright] = m.copyright
-        png[kCGImagePropertyPNGDescription] = m.comment
-        merged[kCGImagePropertyPNGDictionary] = png
-        if removeLocation {
-            merged[kCGImagePropertyGPSDictionary] = nil
-        } else if let lat = Double(m.latitude), let lon = Double(m.longitude) {
-            merged[kCGImagePropertyGPSDictionary] = [
-                kCGImagePropertyGPSLatitude: abs(lat), kCGImagePropertyGPSLatitudeRef: lat < 0 ? "S" : "N",
-                kCGImagePropertyGPSLongitude: abs(lon), kCGImagePropertyGPSLongitudeRef: lon < 0 ? "W" : "E",
-            ]
+        return try reencode(url, suffix: " edited") { props in
+            var merged = props
+            var tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
+            tiff[kCGImagePropertyTIFFImageDescription] = m.title
+            tiff[kCGImagePropertyTIFFArtist] = m.author
+            tiff[kCGImagePropertyTIFFCopyright] = m.copyright
+            merged[kCGImagePropertyTIFFDictionary] = tiff
+            var exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+            exif[kCGImagePropertyExifUserComment] = m.comment
+            if !m.date.isEmpty { exif[kCGImagePropertyExifDateTimeOriginal] = m.date }
+            merged[kCGImagePropertyExifDictionary] = exif
+            var png = props[kCGImagePropertyPNGDictionary] as? [CFString: Any] ?? [:]
+            png[kCGImagePropertyPNGTitle] = m.title
+            png[kCGImagePropertyPNGAuthor] = m.author
+            png[kCGImagePropertyPNGCopyright] = m.copyright
+            png[kCGImagePropertyPNGDescription] = m.comment
+            merged[kCGImagePropertyPNGDictionary] = png
+            if removeLocation {
+                merged[kCGImagePropertyGPSDictionary] = nil
+            } else if let latitude, let longitude {
+                merged[kCGImagePropertyGPSDictionary] = [
+                    kCGImagePropertyGPSLatitude: abs(latitude), kCGImagePropertyGPSLatitudeRef: latitude < 0 ? "S" : "N",
+                    kCGImagePropertyGPSLongitude: abs(longitude), kCGImagePropertyGPSLongitudeRef: longitude < 0 ? "W" : "E",
+                ]
+            }
+            return merged
         }
-        let ext = ImageEngine.writableExtension(for: url)
-        let fallback = Output.file(for: url, suffix: " edited", ext: ext)
-        try ImageEngine.write(image, to: fallback, ext: ext, quality: 1, metadata: merged)
-        return fallback
+    }
+
+    private static func matches(_ written: Metadata, _ wanted: Metadata, removeLocation: Bool) -> Bool {
+        guard written.title == wanted.title, written.author == wanted.author, written.copyright == wanted.copyright,
+              written.comment == wanted.comment, wanted.date.isEmpty || written.date == wanted.date
+        else { return false }
+        if removeLocation { return written.latitude.isEmpty }
+        guard let lat = Double(wanted.latitude), let lon = Double(wanted.longitude) else { return true }
+        return abs((Double(written.latitude) ?? .nan) - lat) < 1e-4 && abs((Double(written.longitude) ?? .nan) - lon) < 1e-4
     }
 
     /// Re-encodes without any metadata at all.
     static func stripMetadata(_ url: URL) throws -> URL {
-        let (image, _) = try ImageEngine.load(url)
+        try reencode(url, suffix: " clean") { _ in nil }
+    }
+
+    /// Writes a fresh copy whose metadata comes from `metadata(originalProperties)`.
+    /// Animated GIFs keep every frame and their timing.
+    private static func reencode(_ url: URL, suffix: String, metadata: ([CFString: Any]) -> [CFString: Any]?) throws -> URL {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { throw ConvertError("Can't read \(url.lastPathComponent)") }
         let ext = ImageEngine.writableExtension(for: url)
-        let out = Output.file(for: url, suffix: " clean", ext: ext)
-        try ImageEngine.write(image, to: out, ext: ext, quality: 1, metadata: nil)
+        let count = CGImageSourceGetCount(source)
+
+        if count > 1, ext == "gif" {
+            let out = Output.file(for: url, suffix: suffix, ext: "gif")
+            guard let destination = CGImageDestinationCreateWithURL(out as CFURL, UTType.gif.identifier as CFString, count, nil) else {
+                throw ConvertError("Can't write GIF files")
+            }
+            let fileProps = CGImageSourceCopyProperties(source, nil) as? [CFString: Any] ?? [:]
+            if let gif = fileProps[kCGImagePropertyGIFDictionary] {
+                CGImageDestinationSetProperties(destination, [kCGImagePropertyGIFDictionary: gif] as CFDictionary)
+            }
+            for index in 0..<count {
+                // Only the frame timing travels along; everything else is dropped.
+                let frame = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any] ?? [:]
+                let timing = frame[kCGImagePropertyGIFDictionary].map { [kCGImagePropertyGIFDictionary: $0] } ?? [:]
+                CGImageDestinationAddImageFromSource(destination, source, index, timing as CFDictionary)
+            }
+            guard CGImageDestinationFinalize(destination) else { throw ConvertError("Couldn't write the GIF") }
+            return out
+        }
+
+        let (image, props) = try ImageEngine.load(url)
+        let out = Output.file(for: url, suffix: suffix, ext: ext)
+        try ImageEngine.write(image, to: out, ext: ext, quality: 1, metadata: metadata(props))
         return out
     }
 }

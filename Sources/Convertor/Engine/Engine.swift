@@ -21,7 +21,7 @@ enum Engine {
                 try ImageEngine.imagesToPDF(urls, output: out)
                 return [out]
             case .merge:
-                return [try await DocumentEngine.merge(urls)]
+                return [try DocumentEngine.merge(urls)]
             case .zip:
                 return [try await ArchiveEngine.pack(urls, as: "zip")]
             default:
@@ -62,12 +62,12 @@ enum Engine {
         case .compress:
             switch kind {
             case .image: return try ImageEngine.compress(url)
-            case .pdf: return try await DocumentEngine.compressPDF(url)
+            case .pdf: return try DocumentEngine.compressPDF(url)
             default: return try await MediaEngine.compress(url)
             }
         case .mute: return try await MediaEngine.mute(url)
         case .normalize: return try await MediaEngine.normalize(url)
-        case .split where kind == .pdf: return try await DocumentEngine.splitPDF(url)
+        case .split where kind == .pdf: return try DocumentEngine.splitPDF(url)
         case .extract: return try await ArchiveEngine.extract(url)
         default: throw ConvertError("\(tool.rawValue) needs its editor window")
         }

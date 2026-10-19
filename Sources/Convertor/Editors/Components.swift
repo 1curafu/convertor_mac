@@ -408,7 +408,8 @@ final class MediaSession: ObservableObject {
 
     init(url: URL) {
         self.url = url
-        player = Media.isAppleReadable(url) || ["flac", "aac"].contains(Catalog.normalize(url)) ? AVPlayer(url: url) : nil
+        // AVPlayer also plays FLAC, though AVAssetExportSession can't write it.
+        player = Media.isAppleReadable(url) || Catalog.normalize(url) == "flac" ? AVPlayer(url: url) : nil
         observer = player?.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
                 guard let self else { return }

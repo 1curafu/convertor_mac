@@ -5,8 +5,8 @@ import Quartz
 /// Documents, e-books, slides and PDFs.
 /// Native code (NSAttributedString, PDFKit, our own EPUB/PPTX/XLSX writers) handles what it can;
 /// Pages and Keynote take over for their own formats and for layout-faithful Office rendering.
-/// Runs on the main actor because the HTML importer and the print system require it.
-@MainActor
+/// Only the rich-text import/export and printing run on the main actor (the HTML importer and the
+/// print system require it); rendering, OCR and PDF work stay in the background.
 enum DocumentEngine {
     private static let richTypes: [String: NSAttributedString.DocumentType] = [
         "docx": .officeOpenXML, "rtf": .rtf, "html": .html, "odt": .openDocument, "doc": .docFormat,
@@ -43,6 +43,7 @@ enum DocumentEngine {
         return try await writeRich(text, ext: ext, source: url)
     }
 
+    @MainActor
     static func readRich(_ url: URL) async throws -> NSAttributedString {
         switch Catalog.normalize(url) {
         case "pages":
@@ -61,6 +62,7 @@ enum DocumentEngine {
     }
 
     /// Writes rich text as `ext` next to `source`. Images of several pages go into a folder.
+    @MainActor
     static func writeRich(_ text: NSAttributedString, ext: String, source: URL) async throws -> [URL] {
         let out = Output.file(for: source, ext: ext)
         switch ext {
@@ -91,6 +93,7 @@ enum DocumentEngine {
         return [out]
     }
 
+    @MainActor
     private static func richData(_ text: NSAttributedString, ext: String) throws -> Data {
         guard let type = richTypes[ext] else { throw ConvertError("Can't write \(ext.uppercased()) documents") }
         var attributes: [NSAttributedString.DocumentAttributeKey: Any] = [.documentType: type]
@@ -99,6 +102,7 @@ enum DocumentEngine {
     }
 
     /// Lays rich text out on US Letter pages.
+    @MainActor
     static func printToPDF(_ text: NSAttributedString, output: URL) throws {
         let info = NSPrintInfo(dictionary: [.jobSavingURL: output])
         info.jobDisposition = .save

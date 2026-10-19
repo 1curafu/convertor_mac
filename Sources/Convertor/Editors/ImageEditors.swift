@@ -64,6 +64,9 @@ struct CropImageEditor: View {
                 aspect = .free
                 rect = CGRect(x: 0, y: 0, width: 1, height: 1)
             }
+            if context.urls.count > 1 {
+                Text("The same crop is applied to all \(context.urls.count) images.").font(.caption).foregroundStyle(.secondary)
+            }
         }
         .task { await source.load(context.url) }
         .onChange(of: aspect) { _, newValue in
@@ -76,12 +79,16 @@ struct CropImageEditor: View {
     }
 
     private func save() {
-        let url = context.url, rect = rect
+        let urls = context.urls, rect = rect
         let size: CGSize? = {
             guard let w = Double(outputWidth), let h = Double(outputHeight), w >= 1, h >= 1 else { return nil }
             return CGSize(width: w, height: h)
         }()
-        context.save("Crop") { try await EditJobs.cropImage(url, rect: rect, size: size) }
+        context.save("Crop") {
+            var outputs: [URL] = []
+            for url in urls { outputs += try await EditJobs.cropImage(url, rect: rect, size: size) }
+            return outputs
+        }
     }
 }
 
@@ -238,7 +245,8 @@ struct RedactImageEditor: View {
         .task { await source.load(context.url) }
         .task(id: PreviewKey(areas: areas, style: style, on: showResult)) {
             guard showResult, let preview = source.preview else { return }
-            result = try? ImageEdits.redact(preview, areas: areas, style: style)
+            let areas = areas, style = style
+            result = await Task.detached { try? ImageEdits.redact(preview, areas: areas, style: style) }.value
         }
     }
 
@@ -307,7 +315,8 @@ struct BackgroundEditor: View {
         .task { await source.load(context.url) }
         .task(id: PreviewKey(options: options, loaded: source.preview != nil)) {
             guard let image = source.preview else { return }
-            preview = try? ImageEdits.addBackground(image, options)
+            let options = options
+            preview = await Task.detached { try? ImageEdits.addBackground(image, options) }.value
         }
     }
 
@@ -317,8 +326,12 @@ struct BackgroundEditor: View {
     }
 
     private func save() {
-        let url = context.url, options = options
-        context.save("Add Background") { try await EditJobs.addBackground(url, options) }
+        let urls = context.urls, options = options
+        context.save("Add Background") {
+            var outputs: [URL] = []
+            for url in urls { outputs += try await EditJobs.addBackground(url, options) }
+            return outputs
+        }
     }
 }
 
@@ -376,7 +389,8 @@ struct PhotoEditor: View {
         .task { await source.load(context.url) }
         .task(id: PreviewKey(adjustments: adjustments, loaded: source.preview != nil)) {
             guard let image = source.preview else { return }
-            preview = try? ImageEdits.render(ImageEdits.adjust(CIImage(cgImage: image), adjustments))
+            let adjustments = adjustments
+            preview = await Task.detached { try? ImageEdits.render(ImageEdits.adjust(CIImage(cgImage: image), adjustments)) }.value
         }
     }
 
@@ -386,8 +400,12 @@ struct PhotoEditor: View {
     }
 
     private func save() {
-        let url = context.url, adjustments = adjustments
-        context.save("Edit") { try await EditJobs.editPhoto(url, adjustments) }
+        let urls = context.urls, adjustments = adjustments
+        context.save("Edit") {
+            var outputs: [URL] = []
+            for url in urls { outputs += try await EditJobs.editPhoto(url, adjustments) }
+            return outputs
+        }
     }
 }
 
@@ -450,7 +468,10 @@ struct CollageEditor: View {
         .task(id: PreviewKey(order: order, layout: layout, spacing: spacing, corners: corners, background: background, count: thumbnails.count)) {
             let images = order.compactMap { thumbnails[$0] }
             guard images.count == order.count, !images.isEmpty else { return }
-            preview = try? ImageEdits.collage(images, layout: layout, spacing: spacing, cornerRadius: corners, background: background, width: 1200)
+            let layout = layout, spacing = spacing, corners = corners, background = background
+            preview = await Task.detached {
+                try? ImageEdits.collage(images, layout: layout, spacing: spacing, cornerRadius: corners, background: background, width: 1200)
+            }.value
         }
     }
 

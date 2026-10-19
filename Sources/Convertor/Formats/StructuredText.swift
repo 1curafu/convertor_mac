@@ -3,12 +3,13 @@ import AppKit
 /// Fonts for generated documents. The system UI font has a private name (".SFNS…") that
 /// Word and Pages can't resolve, so documents use Helvetica Neue instead.
 enum DocumentFont {
-    static func regular(_ size: CGFloat) -> NSFont {
-        NSFont(name: "Helvetica Neue", size: size) ?? NSFont(name: "Helvetica", size: size) ?? .systemFont(ofSize: size)
-    }
+    static func regular(_ size: CGFloat) -> NSFont { named("HelveticaNeue", size) }
+    static func bold(_ size: CGFloat) -> NSFont { named("HelveticaNeue-Bold", size) }
+    static func italic(_ size: CGFloat) -> NSFont { named("HelveticaNeue-Italic", size) }
+    static func boldItalic(_ size: CGFloat) -> NSFont { named("HelveticaNeue-BoldItalic", size) }
 
-    static func bold(_ size: CGFloat) -> NSFont {
-        NSFontManager.shared.convert(regular(size), toHaveTrait: .boldFontMask)
+    private static func named(_ name: String, _ size: CGFloat) -> NSFont {
+        NSFont(name: name, size: size) ?? NSFont(name: "Helvetica", size: size) ?? .systemFont(ofSize: size)
     }
 }
 
@@ -52,13 +53,14 @@ struct StructuredText {
             var largest: CGFloat = 0
             text.enumerateAttribute(.font, in: range) { value, runRange, _ in
                 let font = value as? NSFont
-                let traits = font.map { NSFontManager.shared.traits(of: $0) } ?? []
+                let traits = font?.fontDescriptor.symbolicTraits ?? []
+                let bold = traits.contains(.bold), italic = traits.contains(.italic)
                 largest = max(largest, font?.pointSize ?? body)
                 let piece = string.substring(with: runRange)
-                if let last = runs.last, last.bold == traits.contains(.boldFontMask), last.italic == traits.contains(.italicFontMask) {
+                if let last = runs.last, last.bold == bold, last.italic == italic {
                     runs[runs.count - 1].text += piece
                 } else {
-                    runs.append(Run(text: piece, bold: traits.contains(.boldFontMask), italic: traits.contains(.italicFontMask)))
+                    runs.append(Run(text: piece, bold: bold, italic: italic))
                 }
             }
             let plain = runs.map(\.text).joined().trimmingCharacters(in: .whitespaces)
@@ -182,8 +184,9 @@ struct StructuredText {
             style.paragraphSpacing = heading ? 6 : 8
             style.paragraphSpacingBefore = heading ? 10 : 0
             for run in runs {
-                var font = heading || run.bold ? DocumentFont.bold(size) : DocumentFont.regular(size)
-                if run.italic { font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) }
+                let bold = heading || run.bold
+                let font = run.italic ? (bold ? DocumentFont.boldItalic(size) : DocumentFont.italic(size))
+                    : (bold ? DocumentFont.bold(size) : DocumentFont.regular(size))
                 result.append(NSAttributedString(string: run.text, attributes: [.font: font, .paragraphStyle: style]))
             }
             result.append(NSAttributedString(string: "\n", attributes: [.font: DocumentFont.regular(size), .paragraphStyle: style]))

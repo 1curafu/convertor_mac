@@ -159,20 +159,29 @@ enum Spreadsheet {
 
         var sheets: [Workbook.Sheet] = []
         for table in content.elements("table") {
-            var rows: [[String]] = []
+            // Runs of (value, repeat count). Repeats are expanded in full, except trailing blank
+            // runs, which ODS uses to pad sheets out to thousands of columns/rows.
+            var rowRuns: [(cells: [String], count: Int)] = []
             for row in table.elements("table-row") {
-                var cells: [String] = []
+                var cellRuns: [(text: String, count: Int)] = []
                 for cell in row.children?.compactMap({ $0 as? XMLElement }) ?? [] where cell.localName?.hasSuffix("table-cell") == true {
                     let text = cell.elements("p").map { $0.stringValue ?? "" }.joined(separator: "\n")
                     let repeats = Int(cell.attribute(forName: "table:number-columns-repeated")?.stringValue ?? "") ?? 1
-                    // Blank filler cells can repeat thousands of times; they're trimmed below anyway.
-                    cells += Array(repeating: text, count: text.isEmpty ? min(repeats, 64) : min(repeats, 10_000))
+                    cellRuns.append((text, max(1, repeats)))
                 }
-                while cells.last?.isEmpty == true { cells.removeLast() }
+                while cellRuns.last?.text.isEmpty == true { cellRuns.removeLast() }
+                var cells: [String] = []
+                for run in cellRuns where cells.count < 16_384 {
+                    cells += Array(repeating: run.text, count: min(run.count, 16_384 - cells.count))
+                }
                 let repeats = Int(row.attribute(forName: "table:number-rows-repeated")?.stringValue ?? "") ?? 1
-                rows += Array(repeating: cells, count: cells.isEmpty ? min(repeats, 64) : min(repeats, 10_000))
+                rowRuns.append((cells, max(1, repeats)))
             }
-            while rows.last?.isEmpty == true { rows.removeLast() }
+            while rowRuns.last?.cells.isEmpty == true { rowRuns.removeLast() }
+            var rows: [[String]] = []
+            for run in rowRuns where rows.count < 1_048_576 {
+                rows += Array(repeating: run.cells, count: min(run.count, 1_048_576 - rows.count))
+            }
             sheets.append(.init(name: table.attribute(forName: "table:name")?.stringValue ?? "Sheet\(sheets.count + 1)", rows: rows))
         }
         return Workbook(sheets: sheets)

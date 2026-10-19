@@ -22,7 +22,12 @@ enum ImageEngine {
             let (image, props) = try load(url)
             try write(image, to: out, ext: ext, quality: quality, metadata: props)
         default:
-            try await FFmpeg.run(input: url, output: out, args: FFmpeg.arguments(for: ext))
+            // WebP/AVIF via ffmpeg, fed an upright PNG so EXIF rotation and ImageIO-only inputs (SVG, RAW) work.
+            let temp = try Output.temporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: temp) }
+            let upright = temp.appendingPathComponent("upright.png")
+            try write(try load(url).0, to: upright, ext: "png", quality: 1, metadata: nil)
+            try await FFmpeg.run(input: upright, output: out, args: FFmpeg.arguments(for: ext))
         }
         return out
     }
@@ -129,14 +134,6 @@ enum ImageEngine {
         ctx.interpolationQuality = .high
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
         guard let result = ctx.makeImage() else { throw ConvertError("Couldn't resize the image") }
-        return result
-    }
-
-    static func filtered(_ image: CGImage, _ transform: (CIImage) -> CIImage) throws -> CGImage {
-        let output = transform(CIImage(cgImage: image))
-        guard let result = CIContext().createCGImage(output, from: output.extent) else {
-            throw ConvertError("Couldn't process the image")
-        }
         return result
     }
 

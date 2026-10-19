@@ -76,6 +76,16 @@ enum Tool: String, Hashable {
     case organize, merge
     case extract, zip
 
+    /// Editors that work on one specific file (drawing on it, scrubbing its timeline) are only
+    /// offered for single files; the rest apply the same settings to every selected file.
+    func worksOnSelections(of kind: FileKind) -> Bool {
+        switch self {
+        case .annotate, .redact, .trim, .snapshot, .bleep: return false
+        case .split, .crop: return kind != .video
+        default: return true
+        }
+    }
+
     /// Tools that open an editor window instead of running straight away.
     func needsEditor(for kind: FileKind) -> Bool {
         switch self {
@@ -144,7 +154,12 @@ enum Catalog {
                 return sourceExts.first != ext
             }
         case .tools:
-            return tools(for: kind, multiple: multiple)
+            let tools = tools(for: kind, multiple: multiple)
+            guard multiple else { return tools }
+            return tools.filter { action in
+                guard case .tool(let tool) = action.kind else { return true }
+                return tool.worksOnSelections(of: kind)
+            }
         case .actions:
             return [
                 .file(.airDrop, "AirDrop", "airplayaudio"),
