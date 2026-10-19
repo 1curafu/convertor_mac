@@ -150,10 +150,15 @@ final class ConvertorTests: XCTestCase {
         for layout in ImageEdits.Layout.allCases {
             exists(try await EditJobs.collage([png, second], layout: layout, spacing: 0.01, cornerRadius: 0.02, background: .tangerine)[0])
         }
-        var metadata = ImageEdits.readMetadata(png)
-        metadata.author = "Convertor Tests"
-        let tagged = try await EditJobs.imageMetadata(png, metadata, removeLocation: true)[0]
-        XCTAssertEqual(ImageEdits.readMetadata(tagged).author, "Convertor Tests")
+        let jpg = try await ImageEngine.convert(png, to: "jpg")
+        for source in [png, jpg] {
+            var metadata = ImageEdits.readMetadata(source)
+            metadata.author = "Convertor Tests"
+            metadata.title = "Sunset"
+            let tagged = try await EditJobs.imageMetadata(source, metadata, removeLocation: true)[0]
+            XCTAssertEqual(ImageEdits.readMetadata(tagged).author, "Convertor Tests", source.pathExtension)
+            XCTAssertEqual(ImageEdits.readMetadata(tagged).title, "Sunset", source.pathExtension)
+        }
     }
 
     // MARK: Spreadsheets

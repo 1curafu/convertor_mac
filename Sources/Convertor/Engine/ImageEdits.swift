@@ -434,9 +434,16 @@ enum ImageEdits {
         var m = Metadata()
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else { return m }
-        let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
-        let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+        var tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
+        var exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
         let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any] ?? [:]
+        // PNG keeps its own text chunks.
+        if let png = props[kCGImagePropertyPNGDictionary] as? [CFString: Any] {
+            tiff[kCGImagePropertyTIFFImageDescription] = tiff[kCGImagePropertyTIFFImageDescription] ?? png[kCGImagePropertyPNGTitle]
+            tiff[kCGImagePropertyTIFFArtist] = tiff[kCGImagePropertyTIFFArtist] ?? png[kCGImagePropertyPNGAuthor]
+            tiff[kCGImagePropertyTIFFCopyright] = tiff[kCGImagePropertyTIFFCopyright] ?? png[kCGImagePropertyPNGCopyright]
+            exif[kCGImagePropertyExifUserComment] = exif[kCGImagePropertyExifUserComment] ?? png[kCGImagePropertyPNGDescription]
+        }
         // PNG and others keep these in XMP rather than TIFF/EXIF fields, so check both.
         let xmp = CGImageSourceCopyMetadataAtIndex(source, 0, nil)
         func text(_ dictionary: CFString, _ key: CFString, _ value: Any?) -> String {
@@ -502,9 +509,16 @@ enum ImageEdits {
             kCGImageDestinationMergeMetadata: true,
             kCGImageMetadataShouldExcludeGPS: removeLocation,
         ]
-        if CGImageDestinationCopyImageSource(destination, source, options as CFDictionary, nil) { return out }
+        if CGImageDestinationCopyImageSource(destination, source, options as CFDictionary, nil) {
+            // Keep the lossless copy only if the tags actually landed (not every format takes XMP).
+            let written = readMetadata(out)
+            if written.title == m.title, written.author == m.author, written.copyright == m.copyright,
+               !removeLocation || written.latitude.isEmpty {
+                return out
+            }
+        }
 
-        // Formats without lossless metadata editing: re-encode at full quality.
+        // Re-encode at full quality with the tags in every dictionary the format might use.
         try? FileManager.default.removeItem(at: out)
         let (image, props) = try ImageEngine.load(url)
         var merged = props
@@ -513,7 +527,24 @@ enum ImageEdits {
         tiff[kCGImagePropertyTIFFArtist] = m.author
         tiff[kCGImagePropertyTIFFCopyright] = m.copyright
         merged[kCGImagePropertyTIFFDictionary] = tiff
-        if removeLocation { merged[kCGImagePropertyGPSDictionary] = nil }
+        var exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+        exif[kCGImagePropertyExifUserComment] = m.comment
+        if !m.date.isEmpty { exif[kCGImagePropertyExifDateTimeOriginal] = m.date }
+        merged[kCGImagePropertyExifDictionary] = exif
+        var png = props[kCGImagePropertyPNGDictionary] as? [CFString: Any] ?? [:]
+        png[kCGImagePropertyPNGTitle] = m.title
+        png[kCGImagePropertyPNGAuthor] = m.author
+        png[kCGImagePropertyPNGCopyright] = m.copyright
+        png[kCGImagePropertyPNGDescription] = m.comment
+        merged[kCGImagePropertyPNGDictionary] = png
+        if removeLocation {
+            merged[kCGImagePropertyGPSDictionary] = nil
+        } else if let lat = Double(m.latitude), let lon = Double(m.longitude) {
+            merged[kCGImagePropertyGPSDictionary] = [
+                kCGImagePropertyGPSLatitude: abs(lat), kCGImagePropertyGPSLatitudeRef: lat < 0 ? "S" : "N",
+                kCGImagePropertyGPSLongitude: abs(lon), kCGImagePropertyGPSLongitudeRef: lon < 0 ? "W" : "E",
+            ]
+        }
         let ext = ImageEngine.writableExtension(for: url)
         let fallback = Output.file(for: url, suffix: " edited", ext: ext)
         try ImageEngine.write(image, to: fallback, ext: ext, quality: 1, metadata: merged)
