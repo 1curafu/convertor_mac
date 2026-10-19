@@ -2,7 +2,7 @@ import Foundation
 import UniformTypeIdentifiers
 
 enum FileKind {
-    case image, video, audio, pdf, document, spreadsheet, subtitle, archive, folder, other
+    case image, video, audio, pdf, document, slides, spreadsheet, epub, subtitle, archive, folder, other
 
     /// The kind shared by every file, or `.other` for a mixed selection.
     static func common(_ urls: [URL]) -> FileKind {
@@ -25,10 +25,14 @@ enum FileKind {
             return .audio
         case "pdf":
             return .pdf
-        case "docx", "doc", "md", "markdown", "txt", "rtf", "rtfd", "html", "htm", "odt":
+        case "docx", "doc", "pages", "md", "markdown", "txt", "rtf", "rtfd", "html", "htm", "odt":
             return .document
-        case "csv", "tsv":
+        case "pptx", "ppt", "key", "odp":
+            return .slides
+        case "xlsx", "xls", "ods", "numbers", "csv", "tsv":
             return .spreadsheet
+        case "epub":
+            return .epub
         case "srt", "vtt":
             return .subtitle
         case "zip", "tar", "gz", "tgz", "rar":
@@ -66,19 +70,20 @@ enum Mode: CaseIterable {
 }
 
 enum Tool: String, Hashable {
-    // images
-    case compressImage, resizeHalf, rotateImage, flipImage, monoImage, stripMetadata, combineToPDF
-    // video
-    case compressVideo, video720, muteVideo, videoFrame, speedUp, joinVideos
-    // audio
-    case compressAudio, normalizeAudio, monoAudio, trimSilence, visualizeAudio
-    // pdf
-    case compressPDF, splitPDF, rotatePDF, mergePDF
-    // archives
+    case compress, metadata, edit, annotate, addBackground, crop, redact, createPDF, collage
+    case mute, trim, speed, snapshot, split, join
+    case normalize, visualize, channels, bleep
+    case organize, merge
     case extract, zip
 
-    /// Batch tools take every dropped file at once and produce a single output.
-    var isBatch: Bool { [.combineToPDF, .joinVideos, .mergePDF, .zip].contains(self) }
+    /// Tools that open an editor window instead of running straight away.
+    func needsEditor(for kind: FileKind) -> Bool {
+        switch self {
+        case .compress, .createPDF, .mute, .normalize, .merge, .extract, .zip: return false
+        case .split: return kind != .pdf
+        default: return true
+        }
+    }
 }
 
 enum FileAction: String, Hashable, CaseIterable {
@@ -104,6 +109,14 @@ struct Action: Identifiable, Hashable {
         }
     }
 
+    /// Caption under the wheel, e.g. "Convert to PNG".
+    var caption: String {
+        switch kind {
+        case .convert: return "Convert to \(title)"
+        case .tool, .file: return title
+        }
+    }
+
     static func convert(_ ext: String, title: String? = nil) -> Action {
         Action(kind: .convert(ext), title: title ?? ext.uppercased(), symbol: "")
     }
@@ -126,7 +139,7 @@ enum Catalog {
         switch mode {
         case .convert:
             let sourceExts = Set(urls.map { normalize($0) })
-            return convertTargets(for: kind).filter { action in
+            return convertTargets(for: kind, from: sourceExts).filter { action in
                 guard case .convert(let ext) = action.kind, sourceExts.count == 1 else { return true }
                 return sourceExts.first != ext
             }
@@ -144,71 +157,77 @@ enum Catalog {
         }
     }
 
-    private static func convertTargets(for kind: FileKind) -> [Action] {
+    private static func convertTargets(for kind: FileKind, from sources: Set<String>) -> [Action] {
+        let targets: [String]
         switch kind {
-        case .image:
-            return ["jpg", "png", "webp", "heic", "tiff", "avif", "bmp", "pdf"].map { .convert($0) }
-        case .video:
-            return ["mp4", "mov", "mkv", "webm", "avi", "wmv", "gif", "mp3"].map { .convert($0) }
-        case .audio:
-            return ["mp3", "m4a", "wav", "flac", "ogg", "opus", "aiff", "wma"].map { .convert($0) }
-        case .pdf:
-            return ["docx", "jpg", "png", "txt", "md", "rtf"].map { .convert($0) }
-        case .document:
-            return ["pdf", "docx", "md", "txt", "html", "rtf", "odt"].map { .convert($0) }
-        case .spreadsheet:
-            return ["csv", "tsv"].map { .convert($0) }
-        case .subtitle:
-            return ["srt", "vtt", "txt"].map { .convert($0) }
+        case .image: targets = ["jpg", "png", "webp", "heic", "avif", "tiff", "bmp", "pdf"]
+        case .video: targets = ["mp4", "mov", "mkv", "webm", "avi", "wmv", "gif", "mp3"]
+        case .audio: targets = ["mp3", "m4a", "wav", "flac", "ogg", "opus", "aiff", "wma"]
+        case .pdf: targets = ["docx", "pages", "pptx", "xlsx", "jpg", "png", "epub", "txt", "md"]
+        case .document: targets = ["pages", "pdf", "docx", "txt", "md", "html", "epub", "png", "jpg"]
+        case .slides: targets = ["pdf", "png", "jpg"] + (sources == ["key"] ? ["pptx"] : [])
+        case .spreadsheet: targets = ["xlsx", "ods", "csv", "tsv", "pdf"]
+        case .epub: targets = ["pdf", "docx", "pages", "txt", "md", "html"]
+        case .subtitle: targets = ["srt", "vtt", "txt"]
         case .archive, .folder, .other:
             return [.convert("zip"), .convert("tar"), .convert("tar.gz", title: "GZIP")]
         }
+        return targets.map { .convert($0) }
     }
 
+    private static let compress = Action.tool(.compress, "Compress", "arrow.down.right.and.arrow.up.left")
+    private static let metadata = Action.tool(.metadata, "Metadata", "tag")
+
+    /// Same order as Tangerine's wheels, clockwise from the top.
     private static func tools(for kind: FileKind, multiple: Bool) -> [Action] {
-        let zip = Action.tool(.zip, "ZIP", "doc.zipper")
         switch kind {
         case .image:
             var tools: [Action] = [
-                .tool(.compressImage, "Compress", "arrow.down.right.and.arrow.up.left"),
-                .tool(.resizeHalf, "Resize ½", "aspectratio"),
-                .tool(.rotateImage, "Rotate", "rotate.right"),
-                .tool(.flipImage, "Flip", "arrow.left.and.right"),
-                .tool(.monoImage, "Mono", "circle.lefthalf.filled"),
-                .tool(.stripMetadata, "No EXIF", "eye.slash"),
+                compress, metadata,
+                .tool(.edit, "Edit", "slider.horizontal.3"),
+                .tool(.annotate, "Annotate", "pencil.tip"),
+                .tool(.addBackground, "Add BG", "photo.artframe"),
+                .tool(.crop, "Crop", "crop"),
+                .tool(.redact, "Redact", "eye.slash"),
             ]
-            if multiple { tools.append(.tool(.combineToPDF, "To PDF", "doc.richtext")) }
+            if multiple {
+                tools += [.tool(.createPDF, "Create PDF", "doc.richtext"), .tool(.collage, "Collage", "square.grid.2x2")]
+            }
             return tools
         case .video:
             var tools: [Action] = [
-                .tool(.compressVideo, "Compress", "arrow.down.right.and.arrow.up.left"),
-                .tool(.video720, "720p", "tv"),
-                .tool(.muteVideo, "Mute", "speaker.slash"),
-                .tool(.videoFrame, "Frame", "camera"),
-                .tool(.speedUp, "2× Speed", "hare"),
+                compress, metadata,
+                .tool(.mute, "Mute", "speaker.slash"),
+                .tool(.trim, "Trim", "scissors"),
+                .tool(.crop, "Crop", "crop"),
+                .tool(.speed, "Speed", "gauge.with.dots.needle.67percent"),
+                .tool(.snapshot, "Snapshot", "camera"),
+                .tool(.split, "Split", "square.split.2x1"),
+                .tool(.redact, "Redact", "eye.slash"),
             ]
-            if multiple { tools.append(.tool(.joinVideos, "Join", "film.stack")) }
+            if multiple { tools.append(.tool(.join, "Join", "film.stack")) }
             return tools
         case .audio:
             return [
-                .tool(.compressAudio, "Compress", "arrow.down.right.and.arrow.up.left"),
-                .tool(.normalizeAudio, "Normalize", "speaker.wave.2"),
-                .tool(.monoAudio, "Mono", "dot.radiowaves.left.and.right"),
-                .tool(.trimSilence, "Trim Silence", "scissors"),
-                .tool(.visualizeAudio, "Visualize", "waveform"),
+                compress, metadata,
+                .tool(.normalize, "Normalize", "waveform"),
+                .tool(.visualize, "Visualize", "waveform.path.ecg.rectangle"),
+                .tool(.trim, "Trim", "scissors"),
+                .tool(.channels, "Channels", "rectangle.split.2x1"),
+                .tool(.bleep, "Bleep", "waveform.badge.exclamationmark"),
             ]
         case .pdf:
             var tools: [Action] = [
-                .tool(.compressPDF, "Compress", "arrow.down.right.and.arrow.up.left"),
-                .tool(.splitPDF, "Split", "scissors"),
-                .tool(.rotatePDF, "Rotate", "rotate.right"),
+                compress, metadata,
+                .tool(.split, "Split", "rectangle.split.3x1"),
+                .tool(.organize, "Organize", "square.grid.3x2"),
             ]
-            if multiple { tools.append(.tool(.mergePDF, "Merge", "rectangle.stack")) }
+            if multiple { tools.append(.tool(.merge, "Merge", "rectangle.stack")) }
             return tools
         case .archive:
             return [.tool(.extract, "Extract", "archivebox")]
-        case .document, .spreadsheet, .subtitle, .folder, .other:
-            return [zip]
+        case .document, .slides, .spreadsheet, .epub, .subtitle, .folder, .other:
+            return [.tool(.zip, "ZIP", "doc.zipper")]
         }
     }
 

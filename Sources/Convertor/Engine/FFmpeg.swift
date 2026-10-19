@@ -6,6 +6,7 @@ enum FFmpeg {
     static var path: String? {
         let fm = FileManager.default
         var candidates: [String] = []
+        if let override = ProcessInfo.processInfo.environment["CONVERTOR_FFMPEG"] { candidates.append(override) }
         if let bundled = Bundle.main.url(forAuxiliaryExecutable: "ffmpeg") { candidates.append(bundled.path) }
         candidates += ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
         return candidates.first { fm.isExecutableFile(atPath: $0) }

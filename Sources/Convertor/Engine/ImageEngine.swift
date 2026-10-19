@@ -29,39 +29,13 @@ enum ImageEngine {
 
     // MARK: Tools
 
-    static func apply(_ tool: Tool, to url: URL) throws -> URL {
+    /// One-tap compression: JPEG (or HEIC when there's transparency) at the compression quality.
+    static func compress(_ url: URL) throws -> URL {
         let (image, props) = try load(url)
-        let ext = writableExtension(for: url)
-
-        switch tool {
-        case .compressImage:
-            let target = hasAlpha(image) ? "heic" : "jpg"
-            let out = Output.file(for: url, suffix: " compressed", ext: target)
-            try write(image, to: out, ext: target, quality: compressQuality, metadata: props)
-            return out
-        case .resizeHalf:
-            let out = Output.file(for: url, suffix: " 50%", ext: ext)
-            try write(try resized(image, scale: 0.5), to: out, ext: ext, quality: quality, metadata: props)
-            return out
-        case .rotateImage:
-            let out = Output.file(for: url, suffix: " rotated", ext: ext)
-            try write(try filtered(image) { $0.oriented(.right) }, to: out, ext: ext, quality: quality, metadata: props)
-            return out
-        case .flipImage:
-            let out = Output.file(for: url, suffix: " flipped", ext: ext)
-            try write(try filtered(image) { $0.oriented(.upMirrored) }, to: out, ext: ext, quality: quality, metadata: props)
-            return out
-        case .monoImage:
-            let out = Output.file(for: url, suffix: " mono", ext: ext)
-            try write(try filtered(image) { $0.applyingFilter("CIPhotoEffectMono") }, to: out, ext: ext, quality: quality, metadata: props)
-            return out
-        case .stripMetadata:
-            let out = Output.file(for: url, suffix: " clean", ext: ext)
-            try write(image, to: out, ext: ext, quality: quality, metadata: nil)
-            return out
-        default:
-            throw ConvertError("Not an image tool")
-        }
+        let target = hasAlpha(image) ? "heic" : "jpg"
+        let out = Output.file(for: url, suffix: " compressed", ext: target)
+        try write(image, to: out, ext: target, quality: compressQuality, metadata: props)
+        return out
     }
 
     static func imagesToPDF(_ urls: [URL], output: URL) throws {
@@ -121,7 +95,7 @@ enum ImageEngine {
     }
 
     /// Keeps the source format for tools, unless ImageIO can't write it.
-    private static func writableExtension(for url: URL) -> String {
+    static func writableExtension(for url: URL) -> String {
         let ext = Catalog.normalize(url)
         return nativeOutputs.contains(ext) ? ext : "png"
     }
@@ -133,7 +107,7 @@ enum ImageEngine {
         }
     }
 
-    private static let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
+    static let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
 
     private static func flattened(_ image: CGImage) -> CGImage {
         let rect = CGRect(x: 0, y: 0, width: image.width, height: image.height)
@@ -146,7 +120,7 @@ enum ImageEngine {
         return ctx.makeImage() ?? image
     }
 
-    private static func resized(_ image: CGImage, scale: CGFloat) throws -> CGImage {
+    static func resized(_ image: CGImage, scale: CGFloat) throws -> CGImage {
         let width = max(1, Int(CGFloat(image.width) * scale))
         let height = max(1, Int(CGFloat(image.height) * scale))
         guard let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
@@ -158,7 +132,7 @@ enum ImageEngine {
         return result
     }
 
-    private static func filtered(_ image: CGImage, _ transform: (CIImage) -> CIImage) throws -> CGImage {
+    static func filtered(_ image: CGImage, _ transform: (CIImage) -> CIImage) throws -> CGImage {
         let output = transform(CIImage(cgImage: image))
         guard let result = CIContext().createCGImage(output, from: output.extent) else {
             throw ConvertError("Couldn't process the image")

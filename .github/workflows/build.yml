@@ -6,9 +6,11 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+      - name: Toolchain
+        run: swift --version && sw_vers
       - name: Build app bundle (with ffmpeg)
         run: scripts/build_app.sh
       - name: Check bundled ffmpeg has the encoders we use
@@ -19,3 +21,14 @@ jobs:
             grep -q " $enc " encoders.txt && echo "✓ $enc" || { echo "✗ $enc missing"; exit 1; }
           done
           grep -E "av1|aom" encoders.txt || echo "no AV1 encoder (AVIF output unavailable)"
+      - name: Run conversion tests
+        run: |
+          export CONVERTOR_FFMPEG="$PWD/build/Convertor.app/Contents/MacOS/ffmpeg"
+          export CONVERTOR_TEST_OUT="$RUNNER_TEMP/convertor-out"
+          swift test 2>&1 | tee test.log
+          test ${PIPESTATUS[0]} -eq 0
+      - name: Validate Office/ODF/EPUB outputs with independent libraries
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet openpyxl python-pptx python-docx
+          "$RUNNER_TEMP/venv/bin/python" scripts/validate_outputs.py "$RUNNER_TEMP/convertor-out"

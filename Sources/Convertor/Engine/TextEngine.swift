@@ -1,6 +1,6 @@
 import Foundation
 
-/// Plain-text formats: subtitles (SRT/VTT) and delimited tables (CSV/TSV).
+/// Subtitles: SRT ↔ VTT, and plain text from either.
 enum TextEngine {
     // MARK: Subtitles
 
@@ -61,64 +61,5 @@ enum TextEngine {
         let millis = Int((value * 1000).rounded())
         return String(format: "%02d:%02d:%02d%@%03d",
                       millis / 3_600_000, millis / 60_000 % 60, millis / 1000 % 60, separator, millis % 1000)
-    }
-
-    // MARK: Tables
-
-    static func convertTable(_ url: URL, to ext: String) throws -> URL {
-        let source = try String(contentsOf: url, encoding: .utf8)
-        let rows = parse(source, delimiter: Catalog.normalize(url) == "tsv" ? "\t" : ",")
-        let delimiter: Character = ext == "tsv" ? "\t" : ","
-        let body = rows.map { row in
-            row.map { escape($0, delimiter: delimiter) }.joined(separator: String(delimiter))
-        }.joined(separator: "\n") + "\n"
-        let out = Output.file(for: url, ext: ext)
-        try body.write(to: out, atomically: true, encoding: .utf8)
-        return out
-    }
-
-    /// RFC 4180 style parser: quoted fields may contain delimiters, quotes ("") and newlines.
-    private static func parse(_ text: String, delimiter: Character) -> [[String]] {
-        var rows: [[String]] = []
-        var row: [String] = []
-        var field = ""
-        var quoted = false
-        var iterator = text.makeIterator()
-
-        func handle(_ char: Character) {
-            switch char {
-            case "\"" where field.isEmpty: quoted = true
-            case delimiter: row.append(field); field = ""
-            case "\n", "\r\n": row.append(field); rows.append(row); row = []; field = ""
-            case "\r": break
-            default: field.append(char)
-            }
-        }
-
-        while let char = iterator.next() {
-            if quoted {
-                if char == "\"" {
-                    if let next = iterator.next() {
-                        if next == "\"" { field.append("\"") } else {
-                            quoted = false
-                            handle(next)
-                        }
-                    } else { quoted = false }
-                } else { field.append(char) }
-            } else {
-                handle(char)
-            }
-        }
-        if !field.isEmpty || !row.isEmpty { row.append(field); rows.append(row) }
-        return rows
-    }
-
-    private static func escape(_ field: String, delimiter: Character) -> String {
-        if delimiter == "\t" {
-            // TSV has no quoting, so flatten anything that would break the layout.
-            return field.replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
-        }
-        guard field.contains(where: { $0 == "," || $0 == "\"" || $0 == "\n" }) else { return field }
-        return "\"" + field.replacingOccurrences(of: "\"", with: "\"\"") + "\""
     }
 }

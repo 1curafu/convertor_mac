@@ -66,36 +66,54 @@ enum Output {
 }
 
 enum Shell {
+    struct Result {
+        let status: Int32
+        let output: Data
+        let errorText: String
+    }
+
     /// Runs a command line tool. stderr goes to a temp file (a pipe could fill up and stall
     /// long ffmpeg runs) and its tail becomes the error message on failure.
     static func run(_ executable: String, _ arguments: [String], cwd: URL? = nil, stdout: URL? = nil) async throws {
-        let errURL = FileManager.default.temporaryDirectory.appendingPathComponent("convertor-\(UUID().uuidString).log")
-        FileManager.default.createFile(atPath: errURL.path, contents: nil)
-        defer { try? FileManager.default.removeItem(at: errURL) }
+        let result = try await capture(executable, arguments, cwd: cwd, stdout: stdout)
+        guard result.status == 0 else {
+            let tail = result.errorText.split(separator: "\n").suffix(3).joined(separator: "\n")
+            let tool = URL(fileURLWithPath: executable).lastPathComponent
+            throw ConvertError(tail.isEmpty ? "\(tool) failed (exit \(result.status))" : "\(tool): \(tail)")
+        }
+    }
+
+    /// Runs a tool and returns its exit status, stdout (unless redirected to `stdout`) and stderr.
+    static func capture(_ executable: String, _ arguments: [String], cwd: URL? = nil, stdout: URL? = nil) async throws -> Result {
+        let fm = FileManager.default
+        let errURL = fm.temporaryDirectory.appendingPathComponent("convertor-\(UUID().uuidString).err")
+        let outURL = stdout ?? fm.temporaryDirectory.appendingPathComponent("convertor-\(UUID().uuidString).out")
+        fm.createFile(atPath: errURL.path, contents: nil)
+        fm.createFile(atPath: outURL.path, contents: nil)
+        defer {
+            try? fm.removeItem(at: errURL)
+            if stdout == nil { try? fm.removeItem(at: outURL) }
+        }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         if let cwd { process.currentDirectoryURL = cwd }
         process.standardInput = FileHandle.nullDevice
-        process.standardError = try FileHandle(forWritingTo: errURL)
-        if let stdout {
-            FileManager.default.createFile(atPath: stdout.path, contents: nil)
-            process.standardOutput = try FileHandle(forWritingTo: stdout)
-        } else {
-            process.standardOutput = FileHandle.nullDevice
-        }
+        let errHandle = try FileHandle(forWritingTo: errURL)
+        let outHandle = try FileHandle(forWritingTo: outURL)
+        process.standardError = errHandle
+        process.standardOutput = outHandle
 
         let status: Int32 = try await withCheckedThrowingContinuation { continuation in
             process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
             do { try process.run() } catch { continuation.resume(throwing: error) }
         }
+        try? errHandle.close()
+        try? outHandle.close()
 
-        guard status == 0 else {
-            let log = (try? String(contentsOf: errURL, encoding: .utf8)) ?? ""
-            let tail = log.split(separator: "\n").suffix(3).joined(separator: "\n")
-            let tool = URL(fileURLWithPath: executable).lastPathComponent
-            throw ConvertError(tail.isEmpty ? "\(tool) failed (exit \(status))" : "\(tool): \(tail)")
-        }
+        let output = stdout == nil ? ((try? Data(contentsOf: outURL)) ?? Data()) : Data()
+        let errorText = (try? String(contentsOf: errURL, encoding: .utf8)) ?? ""
+        return Result(status: status, output: output, errorText: errorText)
     }
 }

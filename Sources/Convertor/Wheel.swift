@@ -37,11 +37,12 @@ final class WheelModel: ObservableObject {
 }
 
 enum WheelGeometry {
-    static let outer: CGFloat = 112
-    static let inner: CGFloat = 46
+    static let outer: CGFloat = 120
+    static let inner: CGFloat = 50
     static let barHeight: CGFloat = 44
-    static let size = CGSize(width: 330, height: 330 + barHeight)
-    static let center = CGPoint(x: size.width / 2, y: barHeight + (size.height - barHeight) / 2)
+    static let captionHeight: CGFloat = 34
+    static let size = CGSize(width: 340, height: barHeight + outer * 2 + 24 + captionHeight)
+    static let center = CGPoint(x: size.width / 2, y: barHeight + outer + 12)
 
     /// Centre angle of segment `index`, in degrees, clockwise from 12 o'clock (y points down).
     static func angle(of index: Int, count: Int) -> Double {
@@ -62,17 +63,21 @@ enum WheelGeometry {
     }
 }
 
-/// One slice of the donut.
+/// One slice of the donut, inset by `inset` so a stroke of twice that width rounds its corners.
 struct RingSegment: Shape {
     let index: Int
     let count: Int
+    var inset: CGFloat = 5
+    var gap: CGFloat = 5   // points between neighbouring tiles
 
     func path(in rect: CGRect) -> Path {
         let center = CGPoint(x: rect.midX, y: rect.midY)
+        let outer = WheelGeometry.outer - inset, inner = WheelGeometry.inner + inset
         let step = 360 / Double(count)
-        let gap = count > 1 ? 2.5 : 0
-        let start = WheelGeometry.angle(of: index, count: count) - step / 2 + gap / 2
-        let end = start + step - gap
+        let middle = Double((outer + inner) / 2)
+        let gapDegrees = count > 1 ? Double(gap + inset * 2) / middle * 180 / .pi : 0
+        let start = WheelGeometry.angle(of: index, count: count) - step / 2 + gapDegrees / 2
+        let end = start + step - gapDegrees
         let samples = max(8, Int(end - start) / 2)
 
         func point(_ radius: CGFloat, _ degrees: Double) -> CGPoint {
@@ -82,11 +87,11 @@ struct RingSegment: Shape {
 
         var path = Path()
         for i in 0...samples {
-            let p = point(WheelGeometry.outer, start + (end - start) * Double(i) / Double(samples))
+            let p = point(outer, start + (end - start) * Double(i) / Double(samples))
             if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
         }
         for i in (0...samples).reversed() {
-            path.addLine(to: point(WheelGeometry.inner, start + (end - start) * Double(i) / Double(samples)))
+            path.addLine(to: point(inner, start + (end - start) * Double(i) / Double(samples)))
         }
         path.closeSubpath()
         return path
@@ -96,6 +101,10 @@ struct RingSegment: Shape {
 struct WheelView: View {
     @ObservedObject var model: WheelModel
 
+    private var hoveredAction: Action? {
+        model.hovered.flatMap { model.actions.indices.contains($0) ? model.actions[$0] : nil }
+    }
+
     var body: some View {
         ZStack {
             ModeBar(mode: model.mode)
@@ -104,6 +113,15 @@ struct WheelView: View {
             wheel
                 .frame(width: WheelGeometry.outer * 2, height: WheelGeometry.outer * 2)
                 .position(WheelGeometry.center)
+
+            Text(hoveredAction?.caption ?? (model.actions.isEmpty ? " " : "Drop on a segment · centre cancels"))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(hoveredAction == nil ? .secondary : .primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .glassEffect(.regular, in: Capsule())
+                .position(x: WheelGeometry.size.width / 2,
+                          y: WheelGeometry.center.y + WheelGeometry.outer + 12 + WheelGeometry.captionHeight / 2)
         }
         .frame(width: WheelGeometry.size.width, height: WheelGeometry.size.height)
         .scaleEffect(model.visible ? 1 : 0.7, anchor: UnitPoint(x: 0.5, y: WheelGeometry.center.y / WheelGeometry.size.height))
@@ -117,40 +135,55 @@ struct WheelView: View {
         let count = model.actions.count
         let labelRadius = (WheelGeometry.inner + WheelGeometry.outer) / 2
         let side = WheelGeometry.outer * 2
+        let idle = Color(nsColor: .controlBackgroundColor).opacity(0.9)
 
         return ZStack {
             Circle()
-                .fill(.regularMaterial)
-                .frame(width: side + 12, height: side + 12)
-                .shadow(color: .black.opacity(0.25), radius: 16, y: 6)
+                .fill(Color.clear)
+                .frame(width: side + 14, height: side + 14)
+                .glassEffect(.regular, in: Circle())
+                .shadow(color: .black.opacity(0.2), radius: 18, y: 8)
 
             if count == 0 {
                 Text("Nothing here for this file")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
-                    .offset(y: -(labelRadius))
+                    .offset(y: -labelRadius)
             }
 
             ForEach(Array(model.actions.enumerated()), id: \.element.id) { index, action in
                 let active = model.hovered == index
                 let radians = WheelGeometry.angle(of: index, count: count) * .pi / 180
+                let segment = RingSegment(index: index, count: count)
+                let fill = active ? Color.tangerine : idle
 
-                RingSegment(index: index, count: count)
-                    .fill(active ? Color.tangerine : Color(nsColor: .controlBackgroundColor).opacity(0.92))
-                    .overlay(RingSegment(index: index, count: count).stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
+                segment
+                    .fill(fill)
+                    .overlay(segment.stroke(fill, style: StrokeStyle(lineWidth: segment.inset * 2, lineJoin: .round)))
+                    .shadow(color: .black.opacity(active ? 0.25 : 0.08), radius: active ? 6 : 2, y: 1)
 
-                SegmentLabel(action: action, active: active)
+                SegmentLabel(action: action, active: active, compact: count > 8)
                     .position(x: side / 2 + labelRadius * CGFloat(cos(radians)), y: side / 2 + labelRadius * CGFloat(sin(radians)))
-                    .scaleEffect(active ? 1.08 : 1)
+                    .scaleEffect(active ? 1.06 : 1)
             }
 
+            // The hub: file icon, or the hovered action's name like Tangerine.
             ZStack {
                 Circle()
                     .fill(Color(nsColor: .windowBackgroundColor))
                     .shadow(color: .black.opacity(0.12), radius: 4)
-                Image(nsImage: model.icon)
-                    .resizable()
-                    .frame(width: 40, height: 40)
+                if let action = hoveredAction {
+                    Text(action.title.uppercased())
+                        .font(.system(size: 10, weight: .bold))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .minimumScaleFactor(0.6)
+                        .padding(6)
+                } else {
+                    Image(nsImage: model.icon)
+                        .resizable()
+                        .frame(width: 40, height: 40)
+                }
                 if model.urls.count > 1 {
                     Text("\(model.urls.count)")
                         .font(.system(size: 10, weight: .bold))
@@ -158,7 +191,7 @@ struct WheelView: View {
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(Capsule().fill(Color.tangerine))
-                        .offset(x: 18, y: -18)
+                        .offset(x: 22, y: -22)
                 }
             }
             .frame(width: (WheelGeometry.inner - 6) * 2, height: (WheelGeometry.inner - 6) * 2)
@@ -170,18 +203,20 @@ struct WheelView: View {
 private struct SegmentLabel: View {
     let action: Action
     let active: Bool
+    let compact: Bool
 
     var body: some View {
         VStack(spacing: 3) {
             if !action.symbol.isEmpty {
-                Image(systemName: action.symbol).font(.system(size: 13, weight: .semibold))
+                Image(systemName: action.symbol).font(.system(size: compact ? 11 : 13, weight: .semibold))
             }
-            Text(action.title)
-                .font(.system(size: action.symbol.isEmpty ? 12 : 9.5, weight: .bold))
+            Text(action.title.uppercased())
+                .font(.system(size: action.symbol.isEmpty ? 12 : (compact ? 7.5 : 8.5), weight: .bold))
+                .tracking(0.2)
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                .minimumScaleFactor(0.6)
         }
-        .frame(width: 58)
+        .frame(width: compact ? 50 : 60)
         .foregroundStyle(active ? Color.white : Color.primary)
     }
 }
@@ -203,8 +238,7 @@ private struct ModeBar: View {
             }
         }
         .padding(3)
-        .background(Capsule().fill(.regularMaterial))
-        .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+        .glassEffect(.regular, in: Capsule())
         .animation(.easeOut(duration: 0.15), value: mode)
     }
 }

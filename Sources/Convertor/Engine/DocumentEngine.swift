@@ -2,78 +2,104 @@ import AppKit
 import PDFKit
 import Quartz
 
-/// Text documents and PDFs, built on NSAttributedString and PDFKit.
+/// Documents, e-books, slides and PDFs.
+/// Native code (NSAttributedString, PDFKit, our own EPUB/PPTX/XLSX writers) handles what it can;
+/// Pages and Keynote take over for their own formats and for layout-faithful Office rendering.
 /// Runs on the main actor because the HTML importer and the print system require it.
 @MainActor
 enum DocumentEngine {
     private static let richTypes: [String: NSAttributedString.DocumentType] = [
         "docx": .officeOpenXML, "rtf": .rtf, "html": .html, "odt": .openDocument, "doc": .docFormat,
     ]
+    /// Formats Pages can open directly.
+    private static let pagesOpenable: Set<String> = ["docx", "doc", "rtf", "txt"]
+    private static let pagesExports: [String: IWork.Format] = [
+        "pdf": .pdf, "docx": .word, "epub": .epub, "txt": .plainText, "rtf": .richText,
+    ]
 
-    // MARK: Documents
+    // MARK: Documents and EPUB
 
-    static func convert(_ url: URL, to ext: String) throws -> URL {
-        let text = try read(url)
-        let out = Output.file(for: url, ext: ext)
-        try write(text, to: out, ext: ext)
-        return out
-    }
+    static func convert(_ url: URL, to ext: String) async throws -> [URL] {
+        let source = Catalog.normalize(url)
 
-    private static func read(_ url: URL) throws -> NSAttributedString {
-        if ["md", "markdown"].contains(url.pathExtension.lowercased()) {
-            return markdown(try String(contentsOf: url, encoding: .utf8))
+        // Pages documents: let Pages export whatever it can natively.
+        if source == "pages", let format = pagesExports[ext] {
+            let out = Output.file(for: url, ext: ext)
+            try await IWork.export(url, with: .pages, as: format, to: out)
+            return [out]
         }
-        return try NSAttributedString(url: url, options: [:], documentAttributes: nil)
+        // Word → PDF keeps its real layout when Pages is available; otherwise fall through.
+        if ext == "pdf", ["docx", "doc", "rtf"].contains(source), IWork.App.pages.isInstalled {
+            let out = Output.file(for: url, ext: ext)
+            if (try? await IWork.export(url, with: .pages, as: .pdf, to: out)) != nil { return [out] }
+        }
+        if ext == "pages", pagesOpenable.contains(source) {
+            let out = Output.file(for: url, ext: ext)
+            try await IWork.saveNative(url, with: .pages, to: out)
+            return [out]
+        }
+
+        let text = try await readRich(url)
+        return try await writeRich(text, ext: ext, source: url)
     }
 
-    private static func write(_ text: NSAttributedString, to out: URL, ext: String) throws {
+    static func readRich(_ url: URL) async throws -> NSAttributedString {
+        switch Catalog.normalize(url) {
+        case "pages":
+            let temp = try Output.temporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: temp) }
+            let docx = temp.appendingPathComponent("document.docx")
+            try await IWork.export(url, with: .pages, as: .word, to: docx)
+            return try NSAttributedString(url: docx, options: [:], documentAttributes: nil)
+        case "epub":
+            return try await EPUB.read(url)
+        case "md":
+            return StructuredText(markdown: try String(contentsOf: url, encoding: .utf8)).attributedString
+        default:
+            return try NSAttributedString(url: url, options: [:], documentAttributes: nil)
+        }
+    }
+
+    /// Writes rich text as `ext` next to `source`. Images of several pages go into a folder.
+    static func writeRich(_ text: NSAttributedString, ext: String, source: URL) async throws -> [URL] {
+        let out = Output.file(for: source, ext: ext)
         switch ext {
-        case "txt", "md":
+        case "txt":
             try text.string.write(to: out, atomically: true, encoding: .utf8)
+        case "md":
+            try StructuredText(text).markdown.write(to: out, atomically: true, encoding: .utf8)
+        case "epub":
+            try await EPUB.write(StructuredText(text), title: Output.baseName(source), to: out)
         case "pdf":
             try printToPDF(text, output: out)
+        case "png", "jpg":
+            let temp = try Output.temporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: temp) }
+            let pdf = temp.appendingPathComponent("document.pdf")
+            try printToPDF(text, output: pdf)
+            guard let document = PDFDocument(url: pdf) else { throw ConvertError("Couldn't lay out the document") }
+            return try renderPages(document, source: source, ext: ext, dpi: 200)
+        case "pages":
+            let temp = try Output.temporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: temp) }
+            let docx = temp.appendingPathComponent("\(Output.baseName(source)).docx")
+            try richData(text, ext: "docx").write(to: docx)
+            try await IWork.saveNative(docx, with: .pages, to: out)
         default:
-            guard let type = richTypes[ext] else { throw ConvertError("Can't write \(ext.uppercased()) documents") }
-            var attributes: [NSAttributedString.DocumentAttributeKey: Any] = [.documentType: type]
-            if type == .html { attributes[.characterEncoding] = String.Encoding.utf8.rawValue }
-            let data = try text.data(from: NSRange(location: 0, length: text.length), documentAttributes: attributes)
-            try data.write(to: out)
+            try richData(text, ext: ext).write(to: out)
         }
+        return [out]
     }
 
-    /// Small Markdown renderer: headings by line, inline styles via Foundation's parser.
-    private static func markdown(_ source: String) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-
-        for line in source.components(separatedBy: .newlines) {
-            var content = Substring(line)
-            var size: CGFloat = 13
-            var heading = false
-            if let level = line.firstIndex(where: { $0 != "#" }).map({ line.distance(from: line.startIndex, to: $0) }),
-               (1...6).contains(level), line.dropFirst(level).first == " " {
-                content = line.dropFirst(level + 1)
-                size = ([26, 22, 18, 16, 14, 13] as [CGFloat])[level - 1]
-                heading = true
-            }
-
-            let parsed = (try? AttributedString(markdown: String(content), options: options)) ?? AttributedString(String(content))
-            for run in parsed.runs {
-                let intent = run.inlinePresentationIntent ?? []
-                var font = intent.contains(.code)
-                    ? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
-                    : NSFont.systemFont(ofSize: size, weight: heading || intent.contains(.stronglyEmphasized) ? .bold : .regular)
-                if intent.contains(.emphasized) { font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) }
-                var attributes: [NSAttributedString.Key: Any] = [.font: font]
-                if let link = run.link { attributes[.link] = link }
-                result.append(NSAttributedString(string: String(parsed[run.range].characters), attributes: attributes))
-            }
-            result.append(NSAttributedString(string: "\n", attributes: [.font: NSFont.systemFont(ofSize: 13)]))
-        }
-        return result
+    private static func richData(_ text: NSAttributedString, ext: String) throws -> Data {
+        guard let type = richTypes[ext] else { throw ConvertError("Can't write \(ext.uppercased()) documents") }
+        var attributes: [NSAttributedString.DocumentAttributeKey: Any] = [.documentType: type]
+        if type == .html { attributes[.characterEncoding] = String.Encoding.utf8.rawValue }
+        return try text.data(from: NSRange(location: 0, length: text.length), documentAttributes: attributes)
     }
 
-    private static func printToPDF(_ text: NSAttributedString, output: URL) throws {
+    /// Lays rich text out on US Letter pages.
+    static func printToPDF(_ text: NSAttributedString, output: URL) throws {
         let info = NSPrintInfo(dictionary: [.jobSavingURL: output])
         info.jobDisposition = .save
         info.paperSize = NSSize(width: 612, height: 792)
@@ -87,7 +113,7 @@ enum DocumentEngine {
         info.isVerticallyCentered = false
 
         let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 612 - 108, height: 1))
-        textView.textStorage?.setAttributedString(text)
+        textView.textStorage?.setAttributedString(text.length > 0 ? text : NSAttributedString(string: " "))
         textView.isVerticallyResizable = true
         if let container = textView.textContainer { textView.layoutManager?.ensureLayout(for: container) }
         textView.sizeToFit()
@@ -95,39 +121,95 @@ enum DocumentEngine {
         let operation = NSPrintOperation(view: textView, printInfo: info)
         operation.showsPrintPanel = false
         operation.showsProgressPanel = false
-        guard operation.run() else { throw ConvertError("Couldn't create the PDF") }
+        guard operation.run(), FileManager.default.fileExists(atPath: output.path) else {
+            throw ConvertError("Couldn't create the PDF")
+        }
+    }
+
+    // MARK: Slides
+
+    static func convertSlides(_ url: URL, to ext: String) async throws -> [URL] {
+        let source = Catalog.normalize(url)
+        if ext == "pptx" {
+            let out = Output.file(for: url, ext: ext)
+            try await IWork.export(url, with: .keynote, as: .powerPoint, to: out)
+            return [out]
+        }
+
+        let temp = try Output.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temp) }
+        let pdf = ext == "pdf" ? Output.file(for: url, ext: "pdf") : temp.appendingPathComponent("slides.pdf")
+        if source != "odp", IWork.App.keynote.isInstalled {
+            try await IWork.export(url, with: .keynote, as: .pdf, to: pdf)
+        } else if LibreOffice.path != nil {
+            try await LibreOffice.convert(url, to: "pdf", output: pdf)
+        } else {
+            throw ConvertError("Keynote is needed for slides. It's free on the Mac App Store.")
+        }
+        if ext == "pdf" { return [pdf] }
+
+        guard let document = PDFDocument(url: pdf), let first = document.page(at: 0) else {
+            throw ConvertError("Couldn't render the slides")
+        }
+        // Aim for 1920 px wide slide images.
+        let width = max(first.bounds(for: .mediaBox).width, 1)
+        return try renderPages(document, source: url, ext: ext, dpi: 72 * 1920 / width)
     }
 
     // MARK: PDF
 
-    static func convertPDF(_ url: URL, to ext: String) throws -> [URL] {
+    static func convertPDF(_ url: URL, to ext: String) async throws -> [URL] {
         guard let document = PDFDocument(url: url) else { throw ConvertError("Can't open \(url.lastPathComponent)") }
+        let out = Output.file(for: url, ext: ext)
+
         switch ext {
         case "jpg", "png":
-            return try renderPages(document, source: url, ext: ext)
-        case "txt", "md":
-            let out = Output.file(for: url, ext: ext)
-            try (document.string ?? "").write(to: out, atomically: true, encoding: .utf8)
-            return [out]
-        default:
-            let text = NSMutableAttributedString()
-            for index in 0..<document.pageCount {
-                if let page = document.page(at: index)?.attributedString { text.append(page) }
-                text.append(NSAttributedString(string: "\n\n"))
+            return try renderPages(document, source: url, ext: ext, dpi: 300)
+        case "txt":
+            try (await PDFText.text(document)).string.write(to: out, atomically: true, encoding: .utf8)
+        case "md":
+            try StructuredText(await PDFText.text(document)).markdown.write(to: out, atomically: true, encoding: .utf8)
+        case "epub":
+            try await EPUB.write(StructuredText(await PDFText.text(document)), title: Output.baseName(url), to: out)
+        case "docx", "pages", "rtf":
+            return try await writeRich(PDFText.text(document), ext: ext, source: url)
+        case "xlsx":
+            // One sheet per page; columns split where the text has tabs or wide gaps.
+            var sheets: [Workbook.Sheet] = []
+            for (index, page) in (await PDFText.pages(document)).enumerated() {
+                let rows = page.string.components(separatedBy: "\n")
+                    .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                    .map { line in
+                        line.components(separatedBy: "\t").flatMap {
+                            $0.replacingOccurrences(of: #" {2,}"#, with: "\t", options: .regularExpression)
+                                .components(separatedBy: "\t")
+                        }.map { $0.trimmingCharacters(in: .whitespaces) }
+                    }
+                sheets.append(.init(name: "Page \(index + 1)", rows: rows))
             }
-            let out = Output.file(for: url, ext: ext)
-            try write(text, to: out, ext: ext)
-            return [out]
+            try await Spreadsheet.write(Workbook(sheets: sheets), to: out, ext: "xlsx")
+        case "pptx":
+            var slides: [(jpeg: Data, width: Int, height: Int)] = []
+            for index in 0..<document.pageCount {
+                guard let page = document.page(at: index), let image = PDFText.render(page, dpi: 150),
+                      let jpeg = NSBitmapImageRep(cgImage: image).representation(using: .jpeg, properties: [.compressionFactor: 0.88])
+                else { continue }
+                slides.append((jpeg, image.width, image.height))
+            }
+            try await PPTX.write(slides: slides, to: out)
+        default:
+            throw ConvertError("Can't convert PDF to \(ext.uppercased())")
         }
+        return [out]
     }
 
-    /// Every page at 300 DPI; several pages land in their own folder.
-    private static func renderPages(_ document: PDFDocument, source: URL, ext: String) throws -> [URL] {
+    /// Every page as an image; several pages land in their own folder.
+    static func renderPages(_ document: PDFDocument, source: URL, ext: String, dpi: CGFloat) throws -> [URL] {
         let count = document.pageCount
         let folder = count > 1 ? try Output.folder(for: source, suffix: " pages") : nil
         var outputs: [URL] = []
         for index in 0..<count {
-            guard let page = document.page(at: index), let image = render(page, dpi: 300) else { continue }
+            guard let page = document.page(at: index), let image = PDFText.render(page, dpi: dpi) else { continue }
             let out = folder.map { Output.unique($0, name: "Page \(index + 1)", ext: ext) } ?? Output.file(for: source, ext: ext)
             try ImageEngine.write(image, to: out, ext: ext, quality: 0.92, metadata: nil)
             outputs.append(out)
@@ -135,54 +217,32 @@ enum DocumentEngine {
         return folder.map { [$0] } ?? outputs
     }
 
-    private static func render(_ page: PDFPage, dpi: CGFloat) -> CGImage? {
-        let bounds = page.bounds(for: .mediaBox)
-        let rotated = page.rotation % 180 != 0
-        let scale = dpi / 72
-        let width = Int((rotated ? bounds.height : bounds.width) * scale)
-        let height = Int((rotated ? bounds.width : bounds.height) * scale)
-        guard width > 0, height > 0,
-              let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
-        else { return nil }
-        ctx.setFillColor(CGColor(gray: 1, alpha: 1))
-        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
-        ctx.scaleBy(x: scale, y: scale)
-        page.draw(with: .mediaBox, to: ctx)
-        return ctx.makeImage()
+    static func compressPDF(_ url: URL) throws -> URL {
+        guard let document = PDFDocument(url: url) else { throw ConvertError("Can't open \(url.lastPathComponent)") }
+        let out = Output.file(for: url, suffix: " compressed", ext: "pdf")
+        var options: [PDFDocumentWriteOption: Any] = [:]
+        let filterURL = URL(fileURLWithPath: "/System/Library/Filters/Reduce File Size.qfilter")
+        if FileManager.default.fileExists(atPath: filterURL.path), let filter = QuartzFilter(url: filterURL) {
+            options[PDFDocumentWriteOption(rawValue: "QuartzFilter")] = filter
+        } else {
+            options[.saveImagesAsJPEGOption] = true
+            options[.optimizeImagesForScreenOption] = true
+        }
+        guard document.write(to: out, withOptions: options) else { throw ConvertError("Couldn't write the PDF") }
+        return out
     }
 
-    static func applyPDF(_ tool: Tool, to url: URL) throws -> URL {
+    /// Each page as its own PDF in a new folder.
+    static func splitPDF(_ url: URL) throws -> URL {
         guard let document = PDFDocument(url: url) else { throw ConvertError("Can't open \(url.lastPathComponent)") }
-        switch tool {
-        case .compressPDF:
-            let out = Output.file(for: url, suffix: " compressed", ext: "pdf")
-            var options: [PDFDocumentWriteOption: Any] = [:]
-            if let filter = QuartzFilter(url: URL(fileURLWithPath: "/System/Library/Filters/Reduce File Size.qfilter")) {
-                options[PDFDocumentWriteOption(rawValue: "QuartzFilter")] = filter
-            }
-            guard document.write(to: out, withOptions: options) else { throw ConvertError("Couldn't write the PDF") }
-            return out
-        case .splitPDF:
-            let folder = try Output.folder(for: url, suffix: " split")
-            for index in 0..<document.pageCount {
-                guard let page = document.page(at: index)?.copy() as? PDFPage else { continue }
-                let single = PDFDocument()
-                single.insert(page, at: 0)
-                single.write(to: Output.unique(folder, name: "\(Output.baseName(url)) \(index + 1)", ext: "pdf"))
-            }
-            return folder
-        case .rotatePDF:
-            for index in 0..<document.pageCount {
-                if let page = document.page(at: index) { page.rotation = (page.rotation + 90) % 360 }
-            }
-            let out = Output.file(for: url, suffix: " rotated", ext: "pdf")
-            guard document.write(to: out) else { throw ConvertError("Couldn't write the PDF") }
-            return out
-        default:
-            throw ConvertError("Not a PDF tool")
+        let folder = try Output.folder(for: url, suffix: " pages")
+        for index in 0..<document.pageCount {
+            guard let page = document.page(at: index)?.copy() as? PDFPage else { continue }
+            let single = PDFDocument()
+            single.insert(page, at: 0)
+            single.write(to: Output.unique(folder, name: "\(Output.baseName(url)) \(index + 1)", ext: "pdf"))
         }
+        return folder
     }
 
     static func merge(_ urls: [URL]) throws -> URL {

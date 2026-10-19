@@ -21,19 +21,27 @@ final class ConversionCenter: ObservableObject {
 
     func perform(_ action: Action, on urls: [URL]) {
         guard !urls.isEmpty else { return }
-        if case .file(let fileAction) = action.kind {
+        switch action.kind {
+        case .file(let fileAction):
             FileActions.perform(fileAction, on: urls)
-            return
+        case .tool(let tool) where tool.needsEditor(for: FileKind.common(urls)):
+            // Let the drag session end before a window takes focus.
+            Task { @MainActor in Editors.open(tool, title: action.title, urls: urls) }
+        default:
+            let name = urls.count == 1 ? urls[0].lastPathComponent : "\(urls.count) files"
+            run("\(name) → \(action.title)") { try await Engine.perform(action, on: urls) }
         }
+    }
 
-        let name = urls.count == 1 ? urls[0].lastPathComponent : "\(urls.count) files"
-        let job = Job(title: "\(name) → \(action.title)", state: .running)
+    /// Runs work in the background as a job in the menu bar history.
+    func run(_ title: String, _ work: @escaping () async throws -> [URL]) {
+        let job = Job(title: title, state: .running)
         jobs.insert(job, at: 0)
         if jobs.count > 30 { jobs.removeLast(jobs.count - 30) }
 
         Task {
             do {
-                let outputs = try await Engine.perform(action, on: urls)
+                let outputs = try await work()
                 update(job.id, .done(outputs))
                 if Prefs.defaults.bool(forKey: Prefs.revealAfter) {
                     NSWorkspace.shared.activateFileViewerSelecting(outputs)
