@@ -231,7 +231,7 @@ struct SegmentLabel: View {
     var body: some View {
         VStack(spacing: 3) {
             if !action.symbol.isEmpty {
-                Image(systemName: action.symbol).font(.system(size: fontSize + 4, weight: .semibold))
+                ActionSymbol(name: action.symbol, size: fontSize + 4)
             }
             Text(action.title.uppercased())
                 .font(.system(size: fontSize, weight: .bold))
@@ -255,6 +255,48 @@ struct SegmentLabel: View {
     static func width(of title: String, size: CGFloat) -> CGFloat {
         let font = NSFont.systemFont(ofSize: size, weight: .bold)
         return NSAttributedString(string: title, attributes: [.font: font, .kern: 0.2]).size().width
+    }
+}
+
+/// An action's icon: an SF Symbol, or a drawn glyph where SF Symbols has none (AirDrop).
+struct ActionSymbol: View {
+    let name: String
+    var size: CGFloat = 13
+
+    var body: some View {
+        if name == "airdrop" {
+            AirDropGlyph().frame(width: size * 1.25, height: size * 1.25)
+        } else {
+            Image(systemName: name).font(.system(size: size, weight: .semibold))
+        }
+    }
+}
+
+/// AirDrop's mark: three rings open at the bottom, with a wedge rising into their centre.
+struct AirDropGlyph: View {
+    var body: some View {
+        Canvas { context, canvas in
+            let side = min(canvas.width, canvas.height)
+            let center = CGPoint(x: canvas.width / 2, y: canvas.height / 2 - side * 0.04)
+            var rings = Path()
+            for radius in [0.13, 0.27, 0.41] {
+                // From lower left, over the top, to lower right (angles grow clockwise on screen).
+                for step in 0...48 {
+                    let degrees = 125 + 290 * Double(step) / 48
+                    let point = CGPoint(x: center.x + side * radius * CGFloat(cos(degrees * .pi / 180)),
+                                        y: center.y + side * radius * CGFloat(sin(degrees * .pi / 180)))
+                    if step == 0 { rings.move(to: point) } else { rings.addLine(to: point) }
+                }
+            }
+            context.stroke(rings, with: .foreground, style: StrokeStyle(lineWidth: side * 0.08, lineCap: .round, lineJoin: .round))
+            var wedge = Path()
+            wedge.move(to: CGPoint(x: center.x, y: center.y + side * 0.02))
+            wedge.addLine(to: CGPoint(x: center.x + side * 0.17, y: canvas.height / 2 + side * 0.48))
+            wedge.addLine(to: CGPoint(x: center.x - side * 0.17, y: canvas.height / 2 + side * 0.48))
+            wedge.closeSubpath()
+            context.fill(wedge, with: .foreground)
+        }
+        .accessibilityLabel("AirDrop")
     }
 }
 

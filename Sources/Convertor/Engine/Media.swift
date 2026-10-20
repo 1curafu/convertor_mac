@@ -67,8 +67,10 @@ enum Media {
         return info
     }
 
-    /// Peak levels (0…1) in `buckets` slices, for drawing a waveform.
+    /// Peak levels (0…1) in `buckets` slices, for drawing a waveform. AVAudioFile reads MP3, WAV,
+    /// M4A and friends; ffmpeg covers the rest.
     static func waveform(_ url: URL, buckets: Int = 400) async -> [Float] {
+        if isAppleReadable(url), let peaks = try? appleWaveform(url, buckets: buckets), !peaks.isEmpty { return peaks }
         guard let ffmpeg = FFmpeg.path,
               let result = try? await Shell.capture(ffmpeg, [
                   "-hide_banner", "-loglevel", "error", "-i", url.path,
@@ -87,6 +89,29 @@ enum Media {
         let loudest = peaks.max() ?? 1
         if loudest > 0 { peaks = peaks.map { $0 / loudest } }
         return peaks
+    }
+
+    private static func appleWaveform(_ url: URL, buckets: Int) throws -> [Float] {
+        let file = try AVAudioFile(forReading: url)
+        let total = file.length
+        guard total > 0, let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 65_536) else { return [] }
+        let perBucket = max(1, total / AVAudioFramePosition(buckets))
+        var peaks = [Float](repeating: 0, count: Int((total + perBucket - 1) / perBucket))
+        var position: AVAudioFramePosition = 0
+        while position < total {
+            try file.read(into: buffer)
+            guard buffer.frameLength > 0, let channels = buffer.floatChannelData else { break }
+            for channel in 0..<Int(buffer.format.channelCount) {
+                let samples = channels[channel]
+                for frame in 0..<Int(buffer.frameLength) {
+                    let bucket = Int((position + AVAudioFramePosition(frame)) / perBucket)
+                    peaks[bucket] = max(peaks[bucket], abs(samples[frame]))
+                }
+            }
+            position += AVAudioFramePosition(buffer.frameLength)
+        }
+        let loudest = peaks.max() ?? 0
+        return loudest > 0 ? peaks.map { $0 / loudest } : peaks
     }
 
     /// One full-resolution frame at `time` seconds.

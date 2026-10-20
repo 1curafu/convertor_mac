@@ -164,11 +164,14 @@ struct ColorSwatches: View {
                     .frame(width: 20, height: 20)
                     .onTapGesture { selection = color }
             }
+            // A colour that isn't one of the swatches is ringed on the picker, so something always reads as chosen.
             ColorPicker("", selection: Binding(
                 get: { Color(cgColor: selection.cgColor) },
                 set: { selection = RGBA(NSColor($0).cgColor) }
             ))
             .labelsHidden()
+            .overlay(Capsule().stroke(Color.tangerine, lineWidth: RGBA.palette.contains(selection) ? 0 : 2.5).padding(-3))
+            .help("Custom colour")
         }
     }
 }

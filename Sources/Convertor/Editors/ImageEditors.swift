@@ -158,7 +158,9 @@ struct AnnotateEditor: View {
             }
             ControlGroup("Colour") { ColorSwatches(selection: $color) }
             ControlGroup("Size") {
-                ValueSlider(title: "Thickness", value: $thickness, range: 0.002...0.02) { String(format: "%.0f", $0 * 1000) }
+                ValueSlider(title: "Thickness", value: $thickness, range: 0.002...0.02) { [width = source.size.width] in
+                    "\(max(1, Int(($0 * width).rounded()))) px"   // a share of the image's width
+                }
             }
             HStack {
                 Button("Undo") { _ = annotations.popLast() }
@@ -303,8 +305,14 @@ struct BackgroundEditor: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                ColorSwatches(selection: $options.color1)
-                if options.style == .gradient { ColorSwatches(selection: $options.color2) }
+                if options.style == .gradient {
+                    Text("From").font(.caption).foregroundStyle(.secondary)
+                    ColorSwatches(selection: $options.color1)
+                    Text("To").font(.caption).foregroundStyle(.secondary)
+                    ColorSwatches(selection: $options.color2)
+                } else {
+                    ColorSwatches(selection: $options.color1)
+                }
             }
             ControlGroup("Aspect ratio") {
                 Picker("", selection: $options.aspect) {
@@ -457,22 +465,29 @@ struct CollageEditor: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                ValueSlider(title: "Spacing", value: $spacing, range: 0...0.05) { "\(Int($0 * 1000))" }
+                ValueSlider(title: "Spacing", value: $spacing, range: 0...0.05) { String(format: "%.1f %%", $0 * 100) }
                 ValueSlider(title: "Corners", value: $corners, range: 0...0.2) { "\(Int($0 * 100))%" }
             }
             ControlGroup("Background") { ColorSwatches(selection: $background) }
             ControlGroup("Order") {
-                ForEach(Array(order.enumerated()), id: \.element) { index, url in
-                    HStack {
-                        Text(url.lastPathComponent).lineLimit(1).truncationMode(.middle).font(.callout)
-                        Spacer()
-                        Button { order.swapAt(index, index - 1) } label: { Image(systemName: "chevron.up") }
-                            .disabled(index == 0)
-                        Button { order.swapAt(index, index + 1) } label: { Image(systemName: "chevron.down") }
-                            .disabled(index == order.count - 1)
+                // Drag to reorder, like Join.
+                List {
+                    ForEach(order, id: \.self) { url in
+                        HStack(spacing: 8) {
+                            Image(systemName: "line.3.horizontal").foregroundStyle(.secondary)
+                            if let thumbnail = thumbnails[url] {
+                                Image(decorative: thumbnail, scale: 1).resizable().scaledToFill()
+                                    .frame(width: 22, height: 22)
+                                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                            }
+                            Text(url.lastPathComponent).lineLimit(1).truncationMode(.middle).font(.callout)
+                        }
                     }
-                    .buttonStyle(.borderless)
+                    .onMove { order.move(fromOffsets: $0, toOffset: $1) }
                 }
+                .listStyle(.bordered(alternatesRowBackgrounds: false))
+                .frame(height: min(CGFloat(order.count) * 30 + 8, 240))
+                Text("Drag to change the order.").font(.caption).foregroundStyle(.secondary)
             }
         }
         .task {

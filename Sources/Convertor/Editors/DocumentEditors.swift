@@ -151,7 +151,9 @@ struct OrganizePDFEditor: View {
                     Button { rotate(-90) } label: { Image(systemName: "rotate.left") }.help("Rotate left")
                     Button { rotate(90) } label: { Image(systemName: "rotate.right") }.help("Rotate right")
                     Button { duplicate() } label: { Image(systemName: "plus.square.on.square") }.help("Duplicate")
-                    Button(role: .destructive) { delete() } label: { Image(systemName: "trash") }.help("Delete")
+                    Button(role: .destructive) { delete() } label: { Image(systemName: "trash") }
+                        .help("Delete (⌫)")
+                        .keyboardShortcut(.delete, modifiers: [])
                 }
                 .disabled(selection.isEmpty)
                 HStack {
@@ -161,7 +163,11 @@ struct OrganizePDFEditor: View {
                 .controlSize(.small)
                 .disabled(selection.isEmpty)
             }
-            Text("Click to select, ⌘-click for more. Drag pages to reorder.").font(.caption).foregroundStyle(.secondary)
+            Text("Click to select, ⌘-click to add a page, ⇧-click for a range, ⌘A for all. Drag pages to reorder.")
+                .font(.caption).foregroundStyle(.secondary)
+            Button("Select All") { selection = Set(pages.map(\.id)) }
+                .keyboardShortcut("a")
+                .controlSize(.small)
             Text("\(pages.count) pages").font(.caption).foregroundStyle(.secondary)
         }
         .task {
@@ -193,8 +199,12 @@ struct OrganizePDFEditor: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            if NSEvent.modifierFlags.contains(.command) {
+            let flags = NSEvent.modifierFlags
+            if flags.contains(.command) {
                 if selected { selection.remove(page.id) } else { selection.insert(page.id) }
+            } else if flags.contains(.shift), let anchor = pages.firstIndex(where: { selection.contains($0.id) }),
+                      let clicked = pages.firstIndex(where: { $0.id == page.id }) {
+                selection = Set(pages[min(anchor, clicked)...max(anchor, clicked)].map(\.id))
             } else {
                 selection = [page.id]
             }

@@ -37,7 +37,12 @@ enum Engine {
         var outputs: [URL] = []
         var failures: [(name: String, error: Error)] = []
         for url in urls {
-            do { outputs += try await work(url) } catch { failures.append((url.lastPathComponent, error)) }
+            try Task.checkCancellation()
+            do { outputs += try await work(url) } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                failures.append((url.lastPathComponent, error))
+            }
         }
         guard let first = failures.first else { return outputs }
         if urls.count == 1 { throw first.error }

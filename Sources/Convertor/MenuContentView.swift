@@ -113,7 +113,7 @@ struct MenuContentView: View {
                         center.perform(action, on: dropped)
                     } label: {
                         VStack(spacing: 3) {
-                            if !action.symbol.isEmpty { Image(systemName: action.symbol) }
+                            if !action.symbol.isEmpty { ActionSymbol(name: action.symbol) }
                             Text(action.title).font(.system(size: 10, weight: .semibold)).lineLimit(1)
                         }
                         .frame(maxWidth: .infinity, minHeight: 40)
@@ -141,14 +141,27 @@ private struct JobRow: View {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).frame(width: 16)
             case .failed:
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).frame(width: 16)
+            case .cancelled:
+                Image(systemName: "minus.circle.fill").foregroundStyle(.secondary).frame(width: 16)
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(job.title).font(.caption).lineLimit(1).truncationMode(.middle)
                 if case .failed(let message) = job.state {
                     Text(message).font(.caption2).foregroundStyle(.secondary).lineLimit(2).help(message)
+                } else if case .cancelled = job.state {
+                    Text("Cancelled").font(.caption2).foregroundStyle(.secondary)
                 }
             }
             Spacer(minLength: 0)
+            if case .running = job.state {
+                Button {
+                    ConversionCenter.shared.cancel(job.id)
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("Stop")
+            }
             if case .done(let outputs) = job.state {
                 Button {
                     NSWorkspace.shared.activateFileViewerSelecting(outputs)

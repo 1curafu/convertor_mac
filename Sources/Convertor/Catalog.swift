@@ -122,10 +122,27 @@ struct Action: Identifiable, Hashable {
     /// Caption under the wheel, e.g. "Convert to PNG".
     var caption: String {
         switch kind {
-        case .convert: return "Convert to \(title)"
+        case .convert(let ext):
+            guard let name = Action.formatNames[ext] else { return "Convert to \(title)" }
+            return "Convert to \(name) (.\(ext))"
         case .tool, .file: return title
         }
     }
+
+    /// Plain names for the caption under the wheel; the tiles keep the short extensions.
+    static let formatNames: [String: String] = [
+        "pdf": "PDF", "docx": "Word document", "pages": "Pages document", "rtf": "Rich Text", "odt": "OpenDocument text",
+        "txt": "plain text", "md": "Markdown", "html": "web page", "epub": "EPUB e-book",
+        "pptx": "PowerPoint", "key": "Keynote", "xlsx": "Excel workbook", "ods": "OpenDocument spreadsheet",
+        "csv": "CSV", "tsv": "tab-separated text", "numbers": "Numbers",
+        "jpg": "JPEG image", "png": "PNG image", "heic": "HEIC image", "webp": "WebP image", "avif": "AVIF image",
+        "tiff": "TIFF image", "bmp": "BMP image", "gif": "GIF animation", "svg": "SVG",
+        "mp4": "MP4 video", "mov": "QuickTime movie", "m4v": "M4V video", "mkv": "Matroska video", "webm": "WebM video",
+        "avi": "AVI video", "wmv": "Windows Media video",
+        "mp3": "MP3 audio", "m4a": "AAC audio", "wav": "WAV audio", "flac": "FLAC lossless audio", "ogg": "Ogg Vorbis audio",
+        "opus": "Opus audio", "aiff": "AIFF audio", "wma": "Windows Media audio",
+        "srt": "SRT subtitles", "vtt": "WebVTT subtitles", "zip": "ZIP archive", "tar": "TAR archive", "tar.gz": "gzipped TAR archive",
+    ]
 
     static func convert(_ ext: String, title: String? = nil) -> Action {
         Action(kind: .convert(ext), title: title ?? ext.uppercased(), symbol: "")
@@ -162,7 +179,7 @@ enum Catalog {
             }
         case .actions:
             return [
-                .file(.airDrop, "AirDrop", "airplayaudio"),
+                .file(.airDrop, "AirDrop", "airdrop"),   // drawn by ActionSymbol: SF Symbols has no AirDrop mark
                 .file(.copy, "Copy", "doc.on.doc"),
                 .file(.copyPath, "Copy Path", "link"),
                 .file(.move, "Move", "folder"),

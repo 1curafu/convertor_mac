@@ -14,6 +14,24 @@ struct MediaPreview: View {
             } else if session.info.hasVideo, let frame = session.frame {
                 ImageStage(image: frame) { _ in EmptyView() }
                     .task(id: Int(session.playhead * 4)) { await session.refreshFrame() }
+            } else if !session.waveform.isEmpty {
+                // Audio: the waveform itself is the stage, with what has played in tangerine.
+                Canvas { context, size in
+                    let peaks = session.waveform
+                    let count = min(peaks.count, Int(size.width / 3))
+                    let step = size.width / CGFloat(max(count, 1))
+                    let played = session.info.duration > 0 ? session.playhead / session.info.duration : 0
+                    for index in 0..<count {
+                        let level = CGFloat(peaks[index * peaks.count / count])
+                        let height = max(2, level * size.height * 0.9)
+                        let rect = CGRect(x: CGFloat(index) * step, y: (size.height - height) / 2, width: max(1, step * 0.6), height: height)
+                        let color = Double(index) / Double(count) <= played ? Color.tangerine : Color.secondary.opacity(0.5)
+                        context.fill(Path(roundedRect: rect, cornerRadius: 1), with: .color(color))
+                    }
+                    let x = size.width * CGFloat(played)
+                    context.fill(Path(CGRect(x: x - 1, y: 0, width: 2, height: size.height)), with: .color(.primary))
+                }
+                .padding(.vertical, 24)
             } else {
                 Image(systemName: "waveform")
                     .font(.system(size: 80, weight: .light))
@@ -63,9 +81,15 @@ struct TrimEditor: View {
             MediaStage(session: session, start: $start, end: $end) { _, _ in EmptyView() }
         } controls: {
             ControlGroup("Selection") {
-                LabeledContent("Start", value: timecode(start))
-                LabeledContent("End", value: timecode(end))
-                LabeledContent("Length", value: timecode(end - start))
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
+                    ForEach([("Start", start), ("End", end), ("Length", end - start)], id: \.0) { label, value in
+                        GridRow {
+                            Text(label).foregroundStyle(.secondary)
+                            Text(timecode(value)).monospacedDigit().gridColumnAlignment(.trailing)
+                        }
+                    }
+                }
+                .font(.callout)
                 HStack {
                     Button("Start at playhead") { start = min(session.playhead, end - 0.1) }
                     Button("End at playhead") { end = max(session.playhead, start + 0.1) }
@@ -272,6 +296,8 @@ struct FrameStage<Overlay: View>: View {
             } else {
                 LoadingStage()
             }
+            // Same transport as the other media editors: step, play and the time readout.
+            TransportBar(session: session, range: start.flatMap { s in end.map { s.wrappedValue...max(s.wrappedValue, $0.wrappedValue) } })
             Timeline(session: session, start: start, end: end) { _, _ in EmptyView() }
                 .frame(height: 56)
         }
@@ -450,6 +476,7 @@ struct VisualizeEditor: View {
     @State private var style = MediaEdits.VisualStyle.waveform
     @State private var color = RGBA.tangerine
     @State private var image: URL?
+    @State private var frame: CGImage?
 
     init(context: EditorContext) {
         self.context = context
@@ -461,7 +488,10 @@ struct VisualizeEditor: View {
             let size = canvas.size
             ZStack {
                 Color.black
-                if style == .image, let image, let picture = NSImage(contentsOf: image) {
+                if let frame {
+                    // A real frame of the video, rendered by the same ffmpeg filters as the export.
+                    Image(decorative: frame, scale: 1).resizable().scaledToFit()
+                } else if style == .image, let image, let picture = NSImage(contentsOf: image) {
                     Image(nsImage: picture).resizable().scaledToFit()
                 } else {
                     Canvas { context, size in
@@ -505,7 +535,21 @@ struct VisualizeEditor: View {
             Text("Creates an MP4 with your audio, ready for social posts.").font(.caption).foregroundStyle(.secondary)
         }
         .task { await session.load(waveform: true) }
+        .task(id: PreviewKey(canvas: canvas, style: style, color: color, image: image, duration: session.info.duration)) {
+            frame = nil
+            guard session.info.duration > 0 else { return }
+            frame = await MediaEdits.visualizeFrame(context.url, canvas: canvas, style: style, color: color.hex, image: image,
+                                                    at: session.info.duration / 3)
+        }
         .onDisappear { session.stop() }
+    }
+
+    private struct PreviewKey: Equatable {
+        let canvas: MediaEdits.Canvas
+        let style: MediaEdits.VisualStyle
+        let color: RGBA
+        let image: URL?
+        let duration: Double
     }
 
     private func chooseImage() {

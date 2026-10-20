@@ -372,6 +372,32 @@ final class ConvertorTests: XCTestCase {
 
     // MARK: Review regressions
 
+    /// Stopping a job from the panel terminates the tool it is running.
+    @MainActor
+    func testJobsCanBeCancelled() async throws {
+        let started = Date()
+        let shell = Task { try await Shell.run("/bin/sleep", ["30"]) }
+        try await Task.sleep(for: .milliseconds(300))
+        shell.cancel()
+        do {
+            try await shell.value
+            XCTFail("sleep should have been stopped")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "\(error)")
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5)
+
+        let center = ConversionCenter.shared
+        center.run("Long job") { try await Shell.run("/bin/sleep", ["30"]); return [] }
+        let job = try XCTUnwrap(center.jobs.first)
+        try await Task.sleep(for: .milliseconds(300))
+        center.cancel(job.id)
+        try await Task.sleep(for: .milliseconds(500))
+        guard case .cancelled = center.jobs.first(where: { $0.id == job.id })?.state else {
+            return XCTFail("the job should show as cancelled")
+        }
+    }
+
     /// The menu bar icon's menu can open Settings and quit.
     @MainActor
     func testStatusItemMenu() {
@@ -557,6 +583,9 @@ final class ConvertorTests: XCTestCase {
         let visualHasVideo = await Media.probe(visual).hasVideo
         XCTAssertTrue(visualHasVideo)
         exists(try await MediaEdits.visualize(audio, canvas: .portrait, style: .bars, color: "FF4F00", image: nil))
+        let preview = await MediaEdits.visualizeFrame(audio, canvas: .square, style: .waveform, color: "FF4F00", image: nil, at: 1)
+        XCTAssertEqual(preview.map { [$0.width, $0.height] }, [MediaEdits.Canvas.square.size.0, MediaEdits.Canvas.square.size.1],
+                       "the Visualize preview is a real frame of the export")
         exists(try await MediaEdits.visualize(audio, canvas: .landscape, style: .image, color: "FF4F00", image: try makePNG("cover.png")))
 
         let folder = try Output.folder(for: video, suffix: " frames")

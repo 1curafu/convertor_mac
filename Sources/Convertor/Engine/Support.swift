@@ -117,12 +117,19 @@ enum Shell {
         process.standardError = errHandle
         process.standardOutput = outHandle
 
-        let status: Int32 = try await withCheckedThrowingContinuation { continuation in
-            process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
-            do { try process.run() } catch { continuation.resume(throwing: error) }
+        // Cancelling the job (from the menu bar panel) stops the tool.
+        try Task.checkCancellation()
+        let status: Int32 = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
+                do { try process.run() } catch { continuation.resume(throwing: error) }
+            }
+        } onCancel: {
+            if process.isRunning { process.terminate() }
         }
         try? errHandle.close()
         try? outHandle.close()
+        try Task.checkCancellation()
 
         let output = stdout == nil ? ((try? Data(contentsOf: outURL)) ?? Data()) : Data()
         let errorText = (try? String(contentsOf: errURL, encoding: .utf8)) ?? ""

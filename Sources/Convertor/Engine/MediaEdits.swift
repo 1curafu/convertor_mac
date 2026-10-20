@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import ImageIO
 
 /// The operations behind the audio/video editor windows. Mostly ffmpeg filter graphs;
 /// AVFoundation passthrough is used for plain cuts of MP4/MOV/M4A because it's lossless and fast.
@@ -121,26 +122,54 @@ enum MediaEdits {
     }
 
     static func visualize(_ url: URL, canvas: Canvas, style: VisualStyle, color: String, image: URL?) async throws -> URL {
-        let (width, height) = canvas.size
         let out = Output.file(for: url, suffix: " visualized", ext: "mp4")
         let encode = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart"]
 
         switch style {
         case .image:
             guard let image else { throw ConvertError("Choose an image first") }
-            let graph = "[0:v]scale=\(width):\(height):force_original_aspect_ratio=decrease,"
-                + "pad=\(width):\(height):(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p[v]"
             try await FFmpeg.run(inputs: [image, url], output: out,
-                                 args: ["-filter_complex", graph, "-map", "[v]", "-map", "1:a", "-tune", "stillimage", "-r", "30"] + encode,
+                                 args: ["-filter_complex", visualGraph(style, canvas: canvas, color: color), "-map", "[v]", "-map", "1:a",
+                                        "-tune", "stillimage", "-r", "30"] + encode,
                                  inputArgs: ["-loop", "1"])
         case .waveform, .bars:
-            let source = style == .waveform
-                ? "showwaves=s=\(width)x\(height):mode=cline:scale=sqrt:colors=0x\(color)"
-                : "showfreqs=s=\(width)x\(height):mode=bar:ascale=sqrt:colors=0x\(color)"
             try await FFmpeg.run(input: url, output: out,
-                                 args: ["-filter_complex", "[0:a]\(source),format=yuv420p[v]", "-map", "[v]", "-map", "0:a"] + encode)
+                                 args: ["-filter_complex", visualGraph(style, canvas: canvas, color: color), "-map", "[v]", "-map", "0:a"] + encode)
         }
         return out
+    }
+
+    /// The filter graph behind `visualize`: input 0 is the picture (still image) or the audio.
+    private static func visualGraph(_ style: VisualStyle, canvas: Canvas, color: String) -> String {
+        let (width, height) = canvas.size
+        switch style {
+        case .image:
+            return "[0:v]scale=\(width):\(height):force_original_aspect_ratio=decrease,"
+                + "pad=\(width):\(height):(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p[v]"
+        case .waveform:
+            return "[0:a]showwaves=s=\(width)x\(height):mode=cline:scale=sqrt:colors=0x\(color),format=yuv420p[v]"
+        case .bars:
+            return "[0:a]showfreqs=s=\(width)x\(height):mode=bar:ascale=sqrt:colors=0x\(color),format=yuv420p[v]"
+        }
+    }
+
+    /// One frame of what `visualize` renders, `time` seconds in, through the same filters, so the
+    /// editor's preview matches the video.
+    static func visualizeFrame(_ url: URL, canvas: Canvas, style: VisualStyle, color: String, image: URL?, at time: Double) async -> CGImage? {
+        guard let ffmpeg = FFmpeg.path else { return nil }
+        var args = ["-hide_banner", "-nostdin", "-loglevel", "error"]
+        if style == .image {
+            guard let image else { return nil }
+            args += ["-i", image.path]
+        } else {
+            args += ["-ss", seconds(time), "-i", url.path]
+        }
+        args += ["-filter_complex", visualGraph(style, canvas: canvas, color: color), "-map", "[v]",
+                 "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"]
+        guard let result = try? await Shell.capture(ffmpeg, args), result.status == 0,
+              let source = CGImageSourceCreateWithData(result.output as CFData, nil)
+        else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
     // MARK: Video

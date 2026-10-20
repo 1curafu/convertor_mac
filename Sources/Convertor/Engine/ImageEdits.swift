@@ -229,7 +229,7 @@ enum ImageEdits {
     struct Background: Equatable {
         enum Style: String, CaseIterable, Identifiable { case solid = "Solid", gradient = "Gradient"; var id: String { rawValue } }
         enum Aspect: String, CaseIterable, Identifiable {
-            case original = "Fit", square = "1:1", portrait = "4:5", landscape = "16:9", story = "9:16"
+            case original = "Original", square = "1:1", portrait = "4:5", landscape = "16:9", story = "9:16"
             var id: String { rawValue }
             var ratio: CGFloat? {
                 switch self {
