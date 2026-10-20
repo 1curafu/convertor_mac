@@ -158,14 +158,17 @@ enum MediaEdits {
     static func visualizeFrame(_ url: URL, canvas: Canvas, style: VisualStyle, color: String, image: URL?, at time: Double) async -> CGImage? {
         guard let ffmpeg = FFmpeg.path else { return nil }
         var args = ["-hide_banner", "-nostdin", "-loglevel", "error"]
+        var graph = visualGraph(style, canvas: canvas, color: color)
         if style == .image {
             guard let image else { return nil }
             args += ["-i", image.path]
         } else {
-            args += ["-ss", seconds(time), "-i", url.path]
+            // The first frames after a seek are still filling up, so start half a second early and
+            // keep a frame from `time` itself.
+            args += ["-ss", seconds(time - 0.5), "-i", url.path]
+            graph = graph.replacingOccurrences(of: "[v]", with: ",select=gte(t\\,0.5)[v]")
         }
-        args += ["-filter_complex", visualGraph(style, canvas: canvas, color: color), "-map", "[v]",
-                 "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"]
+        args += ["-filter_complex", graph, "-map", "[v]", "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"]
         guard let result = try? await Shell.capture(ffmpeg, args), result.status == 0,
               let source = CGImageSourceCreateWithData(result.output as CFData, nil)
         else { return nil }
