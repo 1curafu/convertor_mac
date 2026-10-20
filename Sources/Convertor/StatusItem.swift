@@ -51,6 +51,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     /// False until the menu bar has placed the icon (or when macOS hides it from the menu bar).
     var isInMenuBar: Bool { item.button?.window != nil }
+    var statusWindowVisible: Bool { item.button?.window?.isVisible == true }
 
     func popoverDidClose(_ notification: Notification) { closedAt = Date() }
 

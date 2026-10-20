@@ -146,6 +146,7 @@ final class SnapshotTests: XCTestCase {
         }
 
         // The real panel, opened from the menu bar icon.
+        NSApp.setActivationPolicy(.accessory)
         let controller = StatusItemController()
         for _ in 0..<30 where !controller.isInMenuBar { try await Task.sleep(for: .milliseconds(100)) }
         controller.openPanel()
