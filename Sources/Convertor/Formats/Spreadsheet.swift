@@ -100,6 +100,8 @@ enum Spreadsheet {
         guard let workbook = document(xl.appendingPathComponent("workbook.xml")) else {
             throw ConvertError("\(url.lastPathComponent) has no workbook")
         }
+        let dates = DateCells(styles: document(xl.appendingPathComponent("styles.xml")),
+                              from1904: workbook.elements("workbookPr").first?.attribute(forName: "date1904")?.stringValue == "1")
         var sheets: [Workbook.Sheet] = []
         for sheet in workbook.elements("sheet") {
             let name = sheet.attribute(forName: "name")?.stringValue ?? "Sheet\(sheets.count + 1)"
@@ -121,7 +123,9 @@ enum Spreadsheet {
                     case "s": cells.append(Int(value).flatMap { shared.indices.contains($0) ? shared[$0] : nil } ?? "")
                     case "inlineStr": cells.append(cell.elements("t").map { $0.stringValue ?? "" }.joined())
                     case "b": cells.append(value == "1" ? "TRUE" : "FALSE")
-                    default: cells.append(value)
+                    default:
+                        let style = Int(cell.attribute(forName: "s")?.stringValue ?? "")
+                        cells.append(dates.text(for: value, style: style) ?? value)
                     }
                 }
                 rows.append(cells)
@@ -129,6 +133,38 @@ enum Spreadsheet {
             sheets.append(.init(name: name, rows: rows))
         }
         return Workbook(sheets: sheets)
+    }
+
+    /// XLSX stores dates as day counts and marks them only through the cell's number format.
+    private struct DateCells {
+        private var styles: [Bool] = []
+        private let epoch: Date
+
+        init(styles: XMLDocument?, from1904: Bool) {
+            var formats = Set(14...22).union(45...47)   // built-in date and time formats
+            for format in styles?.elements("numFmt") ?? [] {
+                guard let id = Int(format.attribute(forName: "numFmtId")?.stringValue ?? ""),
+                      let code = format.attribute(forName: "formatCode")?.stringValue else { continue }
+                // Ignore quoted text, escaped characters and [colour]/[$currency] sections.
+                let bare = code.replacing(#/"[^"]*"|\\.|\[[^\]]*\]/#, with: "").lowercased()
+                if bare.contains(where: { "ymdhs".contains($0) }) { formats.insert(id) }
+            }
+            let cellFormats = styles?.elements("cellXfs").first?.elements("xf", deep: false) ?? []
+            self.styles = cellFormats.map { formats.contains(Int($0.attribute(forName: "numFmtId")?.stringValue ?? "") ?? -1) }
+            epoch = DateComponents(calendar: Calendar(identifier: .gregorian), timeZone: TimeZone(identifier: "UTC"),
+                                   year: from1904 ? 1904 : 1899, month: from1904 ? 1 : 12, day: from1904 ? 1 : 30).date!
+        }
+
+        /// "2024-05-01", "2024-05-01 14:30:00" or "14:30:00" for a date-formatted serial; nil otherwise.
+        func text(for value: String, style: Int?) -> String? {
+            guard let style, styles.indices.contains(style), styles[style], let serial = Double(value) else { return nil }
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(identifier: "UTC")
+            let hasTime = serial != serial.rounded(.down)
+            formatter.dateFormat = serial < 1 ? "HH:mm:ss" : hasTime ? "yyyy-MM-dd HH:mm:ss" : "yyyy-MM-dd"
+            return formatter.string(from: epoch.addingTimeInterval((serial * 86400).rounded()))
+        }
     }
 
     /// "C12" → 2
@@ -189,14 +225,24 @@ enum Spreadsheet {
 
     // MARK: Write
 
-    static func write(_ workbook: Workbook, to output: URL, ext: String) async throws {
+    /// Writes `output`. CSV and TSV hold one sheet each, so further sheets go to their own files
+    /// beside it ("Budget - March.csv"); all written files are returned.
+    @discardableResult
+    static func write(_ workbook: Workbook, to output: URL, ext: String) async throws -> [URL] {
         switch ext {
         case "csv", "tsv":
             let delimiter: Character = ext == "tsv" ? "\t" : ","
-            let body = workbook.sheets[0].rows.map { row in
-                row.map { escapeDelimited($0, delimiter: delimiter) }.joined(separator: String(delimiter))
-            }.joined(separator: "\n") + "\n"
-            try body.write(to: output, atomically: true, encoding: .utf8)
+            var outputs: [URL] = []
+            for (index, sheet) in workbook.sheets.enumerated() {
+                let url = index == 0 ? output : Output.unique(output.deletingLastPathComponent(),
+                                                              name: Output.baseName(output) + " - " + sheetName(sheet.name, index: index), ext: ext)
+                let body = sheet.rows.map { row in
+                    row.map { escapeDelimited($0, delimiter: delimiter) }.joined(separator: String(delimiter))
+                }.joined(separator: "\n") + "\n"
+                try body.write(to: url, atomically: true, encoding: .utf8)
+                outputs.append(url)
+            }
+            return outputs
         case "xlsx":
             try await writeXLSX(workbook, to: output)
         case "ods":
@@ -206,6 +252,7 @@ enum Spreadsheet {
         default:
             throw ConvertError("Can't write \(ext.uppercased()) spreadsheets")
         }
+        return [output]
     }
 
     private static func escapeDelimited(_ field: String, delimiter: Character) -> String {
@@ -219,7 +266,8 @@ enum Spreadsheet {
 
     /// Numbers stay numbers in XLSX/ODS; anything with a leading zero ("007") stays text.
     private static func number(_ text: String) -> Double? {
-        guard !text.isEmpty, text.count < 20, let value = Double(text), value.isFinite else { return nil }
+        // Past 15 significant digits a Double loses digits, so long IDs stay text.
+        guard !text.isEmpty, text.filter(\.isNumber).count <= 15, let value = Double(text), value.isFinite else { return nil }
         if text.hasPrefix("0") && text.count > 1 && !text.hasPrefix("0.") { return nil }
         if text.hasPrefix("+") || text.lowercased().contains("e") || text.lowercased().contains("n") { return nil }
         return value

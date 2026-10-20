@@ -11,6 +11,12 @@ struct ConvertorApp: App {
         Settings {
             SettingsView()
         }
+        // ⌘, (while an editor puts the app in the Dock) opens the same window as the panel.
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { SettingsWindow.show() }.keyboardShortcut(",")
+            }
+        }
     }
 }
 

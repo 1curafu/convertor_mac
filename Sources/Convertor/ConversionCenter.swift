@@ -10,6 +10,7 @@ final class ConversionCenter: ObservableObject {
             case running
             case done([URL])
             case failed(String)
+            case cancelled
         }
 
         let id = UUID()
@@ -18,6 +19,12 @@ final class ConversionCenter: ObservableObject {
     }
 
     @Published private(set) var jobs: [Job] = []
+    private var tasks: [UUID: Task<Void, Never>] = [:]
+
+    /// Stops a running job. Tools are terminated and their partial output removed.
+    func cancel(_ id: UUID) {
+        tasks[id]?.cancel()
+    }
 
     func perform(_ action: Action, on urls: [URL]) {
         guard !urls.isEmpty else { return }
@@ -33,22 +40,31 @@ final class ConversionCenter: ObservableObject {
         }
     }
 
-    /// Runs work in the background as a job in the menu bar history.
-    func run(_ title: String, _ work: @escaping () async throws -> [URL]) {
+    /// Runs work in the background as a job in the menu bar history. `reveal: false` skips
+    /// "Reveal results in Finder" for jobs fired in quick succession (saving video frames).
+    func run(_ title: String, reveal: Bool = true, completion: @escaping (Bool) -> Void = { _ in },
+             _ work: @escaping () async throws -> [URL]) {
         let job = Job(title: title, state: .running)
         jobs.insert(job, at: 0)
         if jobs.count > 30 { jobs.removeLast(jobs.count - 30) }
 
-        Task {
+        tasks[job.id] = Task {
+            defer { tasks[job.id] = nil }
             do {
                 let outputs = try await work()
+                try Task.checkCancellation()
                 update(job.id, .done(outputs))
-                if Prefs.defaults.bool(forKey: Prefs.revealAfter) {
+                completion(true)
+                if reveal, Prefs.defaults.bool(forKey: Prefs.revealAfter) {
                     NSWorkspace.shared.activateFileViewerSelecting(outputs)
                 }
                 if Prefs.defaults.bool(forKey: Prefs.playSound) { NSSound(named: "Pop")?.play() }
+            } catch let error where error is CancellationError || Task.isCancelled {
+                update(job.id, .cancelled)
+                completion(false)
             } catch {
                 update(job.id, .failed(error.localizedDescription))
+                completion(false)
                 NSSound.beep()
             }
         }

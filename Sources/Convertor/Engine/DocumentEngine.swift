@@ -118,7 +118,12 @@ enum DocumentEngine {
 
         // Paper is white whatever the Mac's theme. Text with no colour of its own (most Word
         // documents) would otherwise take the dark-mode text colour, white, and vanish.
-        let printable = NSMutableAttributedString(attributedString: text.length > 0 ? text : NSAttributedString(string: " "))
+        let printable = NSMutableAttributedString(attributedString: text)
+        // Trailing line breaks would print an empty last page.
+        while let last = printable.string.unicodeScalars.last, CharacterSet.whitespacesAndNewlines.contains(last) {
+            printable.deleteCharacters(in: NSRange(location: printable.length - 1, length: 1))
+        }
+        if printable.length == 0 { printable.append(NSAttributedString(string: " ")) }
         let whole = NSRange(location: 0, length: printable.length)
         printable.enumerateAttribute(.foregroundColor, in: whole) { value, range, _ in
             if value == nil { printable.addAttribute(.foregroundColor, value: NSColor.black, range: range) }
@@ -136,10 +141,16 @@ enum DocumentEngine {
         let operation = NSPrintOperation(view: textView, printInfo: info)
         operation.showsPrintPanel = false
         operation.showsProgressPanel = false
+        operation.jobTitle = Output.baseName(output)   // becomes the PDF's Title instead of "Untitled"
         var printed = false
         (light ?? NSAppearance.currentDrawing()).performAsCurrentDrawingAppearance { printed = operation.run() }
         guard printed, FileManager.default.fileExists(atPath: output.path) else {
             throw ConvertError("Couldn't create the PDF")
+        }
+        if let document = PDFDocument(url: output),
+           document.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String != operation.jobTitle {
+            document.documentAttributes?[PDFDocumentAttribute.titleAttribute] = operation.jobTitle
+            document.write(to: output)
         }
     }
 
@@ -160,6 +171,8 @@ enum DocumentEngine {
             try await IWork.export(url, with: .keynote, as: .pdf, to: pdf)
         } else if LibreOffice.path != nil {
             try await LibreOffice.convert(url, to: "pdf", output: pdf)
+        } else if source == "odp" {
+            throw ConvertError("LibreOffice is needed to open ODP slides. It's free from libreoffice.org.")
         } else {
             throw ConvertError("Keynote is needed for slides. It's free on the Mac App Store.")
         }
@@ -169,7 +182,7 @@ enum DocumentEngine {
             throw ConvertError("Couldn't render the slides")
         }
         // Aim for 1920 px wide slide images.
-        let width = max(first.bounds(for: .mediaBox).width, 1)
+        let width = max(first.bounds(for: .cropBox).width, 1)
         return try renderPages(document, source: url, ext: ext, dpi: 72 * 1920 / width)
     }
 

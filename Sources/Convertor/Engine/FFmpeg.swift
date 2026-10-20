@@ -24,13 +24,33 @@ enum FFmpeg {
         }
         var arguments = ["-hide_banner", "-nostdin", "-loglevel", "error", "-y"] + inputArgs
         for input in inputs { arguments += ["-i", input.path] }
-        arguments += args + [output.path]
+        arguments += evenDimensions(args) + [output.path]
         do {
             try await Shell.run(path, arguments)
         } catch {
             try? FileManager.default.removeItem(at: output)
             throw error
         }
+    }
+
+    /// libx264 with yuv420p rejects odd widths and heights, which screen recordings often have.
+    /// Rounds the video down to even dimensions: on the mapped filter graph output, the `-vf`
+    /// chain, or a new `-vf`.
+    static func evenDimensions(_ args: [String]) -> [String] {
+        guard args.contains("libx264") else { return args }
+        let even = "scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1"   // square pixels, so players show the new size
+        var args = args
+        if let graph = args.firstIndex(of: "-filter_complex"), graph + 1 < args.count,
+           let map = args.indices.first(where: { $0 > 0 && args[$0 - 1] == "-map" && args[$0].hasPrefix("[") }) {
+            let label = args[map].dropFirst().dropLast()
+            args[graph + 1] += ";[\(label)]\(even)[\(label)even]"
+            args[map] = "[\(label)even]"
+        } else if let filter = args.firstIndex(of: "-vf"), filter + 1 < args.count {
+            args[filter + 1] += ",\(even)"
+        } else {
+            args = ["-vf", even] + args
+        }
+        return args
     }
 
     /// Encoder settings per output extension.

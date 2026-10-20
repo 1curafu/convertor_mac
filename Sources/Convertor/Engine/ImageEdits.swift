@@ -198,6 +198,9 @@ enum ImageEdits {
     static func redact(_ image: CGImage, areas: [CGRect], style: MediaEdits.RedactStyle) throws -> CGImage {
         let base = CIImage(cgImage: image)
         let width = CGFloat(image.width), height = CGFloat(image.height)
+        // Minimum strength relative to the image, so the editor's downscaled preview and the
+        // full-size result hide text equally well.
+        let minimum = max(width, height) * 0.006
         var output = base
         for area in areas {
             // Core Image's origin is bottom-left.
@@ -205,11 +208,11 @@ enum ImageEdits {
             let cover: CIImage
             switch style {
             case .blur:
-                cover = base.clampedToExtent().applyingGaussianBlur(sigma: max(8, min(rect.width, rect.height) / 6))
+                cover = base.clampedToExtent().applyingGaussianBlur(sigma: max(minimum, min(rect.width, rect.height) / 6))
             case .pixelate:
                 let filter = CIFilter.pixellate()
                 filter.inputImage = base.clampedToExtent()
-                filter.scale = Float(max(8, min(rect.width, rect.height) / 8))
+                filter.scale = Float(max(minimum, min(rect.width, rect.height) / 8))
                 filter.center = CGPoint(x: rect.midX, y: rect.midY)
                 cover = filter.outputImage ?? base
             case .solid:
@@ -226,7 +229,7 @@ enum ImageEdits {
     struct Background: Equatable {
         enum Style: String, CaseIterable, Identifiable { case solid = "Solid", gradient = "Gradient"; var id: String { rawValue } }
         enum Aspect: String, CaseIterable, Identifiable {
-            case original = "Fit", square = "1:1", portrait = "4:5", landscape = "16:9", story = "9:16"
+            case original = "Original", square = "1:1", portrait = "4:5", landscape = "16:9", story = "9:16"
             var id: String { rawValue }
             var ratio: CGFloat? {
                 switch self {
@@ -559,9 +562,40 @@ enum ImageEdits {
         return abs((Double(written.latitude) ?? .nan) - lat) < 1e-4 && abs((Double(written.longitude) ?? .nan) - lon) < 1e-4
     }
 
-    /// Re-encodes without any metadata at all.
+    /// A copy without metadata. JPEG, HEIC, PNG and TIFF keep their compressed data untouched (no
+    /// quality loss or growth); anything else, or a copy that still carries tags, is re-encoded.
     static func stripMetadata(_ url: URL) throws -> URL {
-        try reencode(url, suffix: " clean") { _ in nil }
+        if let out = losslessStrip(url) { return out }
+        return try reencode(url, suffix: " clean") { _ in nil }
+    }
+
+    private static func losslessStrip(_ url: URL) -> URL? {
+        let ext = Catalog.normalize(url)
+        guard ["jpg", "heic", "png", "tiff"].contains(ext),
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil), CGImageSourceGetCount(source) == 1,
+              let type = CGImageSourceGetType(source)
+        else { return nil }
+        let out = Output.file(for: url, suffix: " clean", ext: ext)
+        guard let destination = CGImageDestinationCreateWithURL(out as CFURL, type, 1, nil) else { return nil }
+
+        // Keep only the orientation: the pixels aren't rotated, so the picture still shows upright.
+        let metadata = CGImageMetadataCreateMutable()
+        let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        if let orientation = props?[kCGImagePropertyOrientation] as? Int, orientation != 1 {
+            CGImageMetadataSetValueMatchingImageProperty(metadata, kCGImagePropertyTIFFDictionary,
+                                                         kCGImagePropertyTIFFOrientation, orientation as CFNumber)
+        }
+        let options: [CFString: Any] = [kCGImageDestinationMetadata: metadata, kCGImageDestinationMergeMetadata: false,
+                                        kCGImageMetadataShouldExcludeGPS: true, kCGImageMetadataShouldExcludeXMP: true]
+        let copied = CGImageDestinationCopyImageSource(destination, source, options as CFDictionary, nil)
+        let written = copied ? CGImageSourceCreateWithURL(out as CFURL, nil) : nil
+        let back = written.flatMap { CGImageSourceCopyPropertiesAtIndex($0, 0, nil) as? [CFString: Any] }
+        let clean = back.map { $0[kCGImagePropertyGPSDictionary] == nil && readMetadata(out) == Metadata() } ?? false
+        guard clean else {
+            try? FileManager.default.removeItem(at: out)
+            return nil
+        }
+        return out
     }
 
     /// Writes a fresh copy whose metadata comes from `metadata(originalProperties)`.

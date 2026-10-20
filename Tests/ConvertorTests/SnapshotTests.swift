@@ -101,6 +101,8 @@ final class SnapshotTests: XCTestCase {
         let video = try await media("clip.mp4", video: true)
         let audio = try await media("voice.mp3", video: false)
         let document = try pdf("report.pdf")
+        let notes = fixture("notes.txt")
+        try "Notes".write(to: notes, atomically: true, encoding: .utf8)
         let cases: [(name: String, urls: [URL], mode: Mode, hovered: Int?)] = [
             ("wheel-image-convert", [image], .convert, 0),
             ("wheel-image-tools", [image], .tools, 3),
@@ -108,7 +110,8 @@ final class SnapshotTests: XCTestCase {
             ("wheel-video-tools", [video], .tools, 5),
             ("wheel-audio-tools", [audio], .tools, 6),
             ("wheel-pdf-convert", [document], .convert, 1),
-            ("wheel-actions", [image], .actions, 2),
+            ("wheel-actions", [image], .actions, 0),
+            ("wheel-text-tools", [notes], .tools, 0),   // a single-action wheel
         ]
         for (name, urls, mode, hovered) in cases {
             for (theme, appearance) in appearances {
@@ -173,7 +176,7 @@ final class SnapshotTests: XCTestCase {
                 let window = try XCTUnwrap(Editors.windows.last, "\(name) didn't open a window")
                 XCTAssertEqual(Editors.windows.count, before + 1, name)
                 window.appearance = NSAppearance(named: appearance)
-                try await Task.sleep(for: .seconds(2.5))   // let the editor load its file
+                try await Task.sleep(for: .seconds(4))   // let the editor load its file and thumbnails
                 try await capture(window, as: "editor-\(name)-\(theme)")
                 window.close()
             }

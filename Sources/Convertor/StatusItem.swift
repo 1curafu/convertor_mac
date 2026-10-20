@@ -8,6 +8,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     let popover = NSPopover()
     private var monitors: [Any] = []
+    private var dragCountAtPress = 0
 
     override init() {
         super.init()
@@ -46,8 +47,11 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
 
-        let outside = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            MainActor.assumeIsolated { self?.closePanel() }
+        // A click in another app closes the panel, but only once the button is released without
+        // a drag starting: dragging a file from Finder onto the panel starts with that same press.
+        let outside = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp, .rightMouseDown]) { [weak self] event in
+            let type = event.type
+            MainActor.assumeIsolated { self?.otherAppClicked(type) }
         }
         let inside = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { [weak self] event in
             let swallow = MainActor.assumeIsolated { self?.closeIfOutside(event) ?? false }
@@ -56,9 +60,16 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         monitors = [outside, inside].compactMap { $0 }
     }
 
+    private func otherAppClicked(_ type: NSEvent.EventType) {
+        let count = NSPasteboard(name: .drag).changeCount
+        if type == .leftMouseDown { dragCountAtPress = count }
+        else if type == .rightMouseDown || count == dragCountAtPress { closePanel() }
+    }
+
     /// Closes the panel on Escape (swallowing the key) or a click in another of the app's windows.
     /// Clicks on the icon itself are left to `clicked`.
     private func closeIfOutside(_ event: NSEvent) -> Bool {
+        guard NSApp.modalWindow == nil else { return false }  // e.g. the panel's Choose Files… dialog
         if event.type == .keyDown {
             guard event.keyCode == 53 else { return false }
             closePanel()
@@ -113,6 +124,7 @@ enum SettingsWindow {
             window.center()
             self.window = window
         }
+        if let window { Editors.showInDock(window) }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
     }

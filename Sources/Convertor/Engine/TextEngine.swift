@@ -11,7 +11,7 @@ enum TextEngine {
     }
 
     static func convertSubtitles(_ url: URL, to ext: String) throws -> URL {
-        let cues = parseCues(try String(contentsOf: url, encoding: .utf8))
+        let cues = parseCues(try readText(url))
         guard !cues.isEmpty else { throw ConvertError("No subtitles found in \(url.lastPathComponent)") }
 
         let body: String
@@ -45,6 +45,16 @@ enum TextEngine {
             let text = lines[(timing + 1)...].joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
             return text.isEmpty ? nil : Cue(start: start, end: end, text: text)
         }
+    }
+
+    /// UTF-8 or UTF-16 with a byte-order mark; older subtitle files are often Windows-1252 or Latin-1.
+    private static func readText(_ url: URL) throws -> String {
+        let data = try Data(contentsOf: url)
+        let bom = data.prefix(2) == Data([0xFF, 0xFE]) || data.prefix(2) == Data([0xFE, 0xFF])
+        for encoding: String.Encoding in bom ? [.utf16] : [.utf8, .windowsCP1252, .isoLatin1] {
+            if let text = String(data: data, encoding: encoding) { return text }
+        }
+        throw ConvertError("Can't read the text of \(url.lastPathComponent)")
     }
 
     /// Accepts "01:02:03,456", "01:02:03.456" and "02:03.456".

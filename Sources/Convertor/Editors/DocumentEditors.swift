@@ -25,9 +25,11 @@ struct MetadataEditor: View {
                         Text("Clean copies are saved next to the originals.").foregroundStyle(.secondary)
                     }
                 } else {
+                    // No form background of its own, so the stage shows evenly on both sides.
                     Form { formFields }
                         .formStyle(.grouped)
-                        .frame(maxWidth: 520)
+                        .scrollContentBackground(.hidden)
+                        .frame(maxWidth: 560)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -50,15 +52,15 @@ struct MetadataEditor: View {
         switch kind {
         case .image:
             Section("Description") {
-                TextField("Title", text: $image.title)
-                TextField("Author", text: $image.author)
-                TextField("Copyright", text: $image.copyright)
-                TextField("Comment", text: $image.comment)
+                TextField("Title", text: $image.title, prompt: Text("Not set"))
+                TextField("Author", text: $image.author, prompt: Text("Not set"))
+                TextField("Copyright", text: $image.copyright, prompt: Text("Not set"))
+                TextField("Comment", text: $image.comment, prompt: Text("Not set"))
                 TextField("Date taken", text: $image.date, prompt: Text("YYYY:MM:DD HH:MM:SS"))
             }
             Section("Location") {
-                TextField("Latitude", text: $image.latitude)
-                TextField("Longitude", text: $image.longitude)
+                TextField("Latitude", text: $image.latitude, prompt: Text("e.g. 47.2266"))
+                TextField("Longitude", text: $image.longitude, prompt: Text("e.g. 8.8184"))
                 Toggle("Remove location", isOn: $removeLocation)
             }
             if !image.camera.isEmpty {
@@ -67,13 +69,13 @@ struct MetadataEditor: View {
         case .pdf:
             Section("Document") {
                 ForEach(EditJobs.pdfKeys.map { $0.label }, id: \.self) { label in
-                    TextField(label, text: binding(label))
+                    TextField(label, text: binding(label), prompt: Text("Not set"))
                 }
             }
         default:
             Section("Tags") {
                 ForEach(MediaEdits.metadataKeys, id: \.self) { key in
-                    TextField(key.capitalized, text: binding(key))
+                    TextField(key.capitalized, text: binding(key), prompt: Text("Not set"))
                 }
             }
         }
@@ -113,7 +115,7 @@ struct MetadataEditor: View {
         case .image:
             context.save("Metadata") { try await EditJobs.imageMetadata(url, image, removeLocation: removeLocation) }
         case .pdf:
-            context.save("Metadata") { [try EditJobs.pdfMetadata(url, fields: fields, removeAll: false)] }
+            context.save("Metadata") { [try await EditJobs.pdfMetadata(url, fields: fields, removeAll: false)] }
         default:
             context.save("Metadata") { [try await MediaEdits.writeMetadata(url, fields: fields, removeAll: false)] }
         }
@@ -149,7 +151,9 @@ struct OrganizePDFEditor: View {
                     Button { rotate(-90) } label: { Image(systemName: "rotate.left") }.help("Rotate left")
                     Button { rotate(90) } label: { Image(systemName: "rotate.right") }.help("Rotate right")
                     Button { duplicate() } label: { Image(systemName: "plus.square.on.square") }.help("Duplicate")
-                    Button(role: .destructive) { delete() } label: { Image(systemName: "trash") }.help("Delete")
+                    Button(role: .destructive) { delete() } label: { Image(systemName: "trash") }
+                        .help("Delete (⌫)")
+                        .keyboardShortcut(.delete, modifiers: [])
                 }
                 .disabled(selection.isEmpty)
                 HStack {
@@ -159,7 +163,11 @@ struct OrganizePDFEditor: View {
                 .controlSize(.small)
                 .disabled(selection.isEmpty)
             }
-            Text("Click to select, ⌘-click for more. Drag pages to reorder.").font(.caption).foregroundStyle(.secondary)
+            Text("Click to select, ⌘-click to add a page, ⇧-click for a range, ⌘A for all. Drag pages to reorder.")
+                .font(.caption).foregroundStyle(.secondary)
+            Button("Select All") { selection = Set(pages.map(\.id)) }
+                .keyboardShortcut("a")
+                .controlSize(.small)
             Text("\(pages.count) pages").font(.caption).foregroundStyle(.secondary)
         }
         .task {
@@ -167,7 +175,7 @@ struct OrganizePDFEditor: View {
             self.document = document
             pages = (0..<document.pageCount).map { PageItem(index: $0) }
             for index in 0..<document.pageCount {
-                thumbnails[index] = document.page(at: index)?.thumbnail(of: CGSize(width: 240, height: 300), for: .mediaBox)
+                thumbnails[index] = document.page(at: index)?.thumbnail(of: CGSize(width: 240, height: 300), for: .cropBox)
             }
         }
     }
@@ -191,8 +199,12 @@ struct OrganizePDFEditor: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            if NSEvent.modifierFlags.contains(.command) {
+            let flags = NSEvent.modifierFlags
+            if flags.contains(.command) {
                 if selected { selection.remove(page.id) } else { selection.insert(page.id) }
+            } else if flags.contains(.shift), let anchor = pages.firstIndex(where: { selection.contains($0.id) }),
+                      let clicked = pages.firstIndex(where: { $0.id == page.id }) {
+                selection = Set(pages[min(anchor, clicked)...max(anchor, clicked)].map(\.id))
             } else {
                 selection = [page.id]
             }
@@ -269,8 +281,25 @@ enum Editors {
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { note in
             MainActor.assumeIsolated { windows.removeAll { $0 === note.object as? NSWindow } }
         }
+        showInDock(window)
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
+    }
+
+    private static var dockWindows: [NSWindow] = []
+
+    /// A menu bar app has no Dock icon, so a window hidden behind another app would be hard to find.
+    /// While any editor or Settings is open the app shows in the Dock and ⌘-Tab.
+    static func showInDock(_ window: NSWindow) {
+        guard !dockWindows.contains(where: { $0 === window }) else { return }
+        dockWindows.append(window)
+        NSApp.setActivationPolicy(.regular)
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { note in
+            MainActor.assumeIsolated {
+                dockWindows.removeAll { $0 === note.object as? NSWindow }
+                if dockWindows.isEmpty { NSApp.setActivationPolicy(.accessory) }
+            }
+        }
     }
 
     private static func view(for tool: Tool, kind: FileKind, context: EditorContext) -> AnyView? {

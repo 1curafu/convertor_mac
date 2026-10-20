@@ -25,6 +25,14 @@ enum Output {
         return source.deletingLastPathComponent()
     }
 
+    /// Where results go, for the editors' footer: "Saved next to the original", "Saved to Downloads", …
+    static var destinationSummary: String {
+        let probe = URL(fileURLWithPath: "/nonexistent/file")
+        let folder = directory(for: probe)
+        if folder == probe.deletingLastPathComponent() { return "Saved next to the original" }
+        return "Saved to \(FileManager.default.displayName(atPath: folder.path))"
+    }
+
     /// File name without its extension; "x.tar.gz" becomes "x".
     static func baseName(_ url: URL) -> String {
         let name = url.lastPathComponent
@@ -42,6 +50,10 @@ enum Output {
         let url = unique(directory(for: source), name: baseName(source) + suffix, ext: nil)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+
+    static func fileSize(_ url: URL) -> Int? {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
     }
 
     static func unique(_ dir: URL, name: String, ext: String?) -> URL {
@@ -105,12 +117,19 @@ enum Shell {
         process.standardError = errHandle
         process.standardOutput = outHandle
 
-        let status: Int32 = try await withCheckedThrowingContinuation { continuation in
-            process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
-            do { try process.run() } catch { continuation.resume(throwing: error) }
+        // Cancelling the job (from the menu bar panel) stops the tool.
+        try Task.checkCancellation()
+        let status: Int32 = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
+                do { try process.run() } catch { continuation.resume(throwing: error) }
+            }
+        } onCancel: {
+            if process.isRunning { process.terminate() }
         }
         try? errHandle.close()
         try? outHandle.close()
+        try Task.checkCancellation()
 
         let output = stdout == nil ? ((try? Data(contentsOf: outURL)) ?? Data()) : Data()
         let errorText = (try? String(contentsOf: errURL, encoding: .utf8)) ?? ""

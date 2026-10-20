@@ -50,10 +50,14 @@ enum IWork {
         let script = """
         set inFile to POSIX file "\(escape(input.path))"
         set outFile to POSIX file "\(escape(output.path))"
+        set wasRunning to application "\(app.rawValue)" is running
         tell application "\(app.rawValue)"
-            set d to open inFile
-            \(action)
-            close d saving no
+            with timeout of 600 seconds
+                set d to open inFile
+                \(action)
+                close d saving no
+            end timeout
+            if not wasRunning then quit
         end tell
         """
         do {
@@ -87,8 +91,12 @@ enum LibreOffice {
         guard let path else { throw ConvertError("LibreOffice isn't installed") }
         let temp = try Output.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: temp) }
-        try await Shell.run(path, ["--headless", "--convert-to", filter, "--outdir", temp.path, input.path])
-        guard let produced = try FileManager.default.contentsOfDirectory(at: temp, includingPropertiesForKeys: nil).first else {
+        // A private profile lets this run while LibreOffice is open, which otherwise makes soffice exit silently.
+        let profile = temp.appendingPathComponent("profile", isDirectory: true)
+        let outdir = temp.appendingPathComponent("out", isDirectory: true)
+        try await Shell.run(path, ["-env:UserInstallation=\(profile.absoluteString)", "--headless",
+                                   "--convert-to", filter, "--outdir", outdir.path, input.path])
+        guard let produced = try? FileManager.default.contentsOfDirectory(at: outdir, includingPropertiesForKeys: nil).first else {
             throw ConvertError("LibreOffice didn't produce a file")
         }
         try FileManager.default.moveItem(at: produced, to: output)

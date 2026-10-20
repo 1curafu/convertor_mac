@@ -70,6 +70,8 @@ enum ArchiveEngine {
     }
 
     private static func archive(_ items: [String], in directory: URL, to out: URL, ext: String) async throws {
+        // A name like "-v.txt" would be read as an option.
+        let items = items.map { $0.hasPrefix("-") ? "./" + $0 : $0 }
         do {
             switch ext {
             case "zip":

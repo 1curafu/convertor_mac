@@ -104,7 +104,7 @@ enum PDFText {
 
     /// Draws a page onto white at the given resolution.
     static func render(_ page: PDFPage, dpi: CGFloat) -> CGImage? {
-        let bounds = page.bounds(for: .mediaBox)
+        let bounds = page.bounds(for: .cropBox)
         let rotated = page.rotation % 180 != 0
         let scale = dpi / 72
         let width = Int((rotated ? bounds.height : bounds.width) * scale)
@@ -117,7 +117,7 @@ enum PDFText {
         ctx.setFillColor(CGColor(gray: 1, alpha: 1))
         ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
         ctx.scaleBy(x: scale, y: scale)
-        page.draw(with: .mediaBox, to: ctx)
+        page.draw(with: .cropBox, to: ctx)
         return ctx.makeImage()
     }
 }

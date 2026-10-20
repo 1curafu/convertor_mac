@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 
 extension Color {
     static let tangerine = Color(red: 1.0, green: 0.31, blue: 0.0)
+    /// For fills that carry white text: 4.6:1 contrast (WCAG AA), where `tangerine` only reaches 3.3:1.
+    static let tangerineDeep = Color(red: 0.84, green: 0.247, blue: 0.0)
 }
 
 /// State for the wheel that pops up under the cursor mid-drag.
@@ -37,16 +39,26 @@ final class WheelModel: ObservableObject {
 }
 
 enum WheelGeometry {
-    static let outer: CGFloat = 120
-    static let inner: CGFloat = 50
+    static let outer: CGFloat = 136
+    static let inner: CGFloat = 54
+    static let gap: CGFloat = 4
     static let barHeight: CGFloat = 44
     static let captionHeight: CGFloat = 34
-    static let size = CGSize(width: 340, height: barHeight + outer * 2 + 24 + captionHeight)
+    static let size = CGSize(width: 360, height: barHeight + outer * 2 + 24 + captionHeight)
     static let center = CGPoint(x: size.width / 2, y: barHeight + outer + 12)
 
     /// Centre angle of segment `index`, in degrees, clockwise from 12 o'clock (y points down).
     static func angle(of index: Int, count: Int) -> Double {
         -90 + Double(index) * 360 / Double(count)
+    }
+
+    /// Where a segment's label sits: halfway across the tile, nudged out to where the tile is wider.
+    static let labelRadius = (inner + outer) / 2 + 2
+
+    /// The width a label can use without crossing its tile's edges.
+    static func labelWidth(count: Int) -> CGFloat {
+        let chord = 2 * labelRadius * CGFloat(sin(Double.pi / Double(max(count, 2))))
+        return min(chord - gap, outer - inner) - 8
     }
 
     /// Which segment a point (in the wheel view's coordinates) falls on; nil in the hub or outside.
@@ -63,35 +75,38 @@ enum WheelGeometry {
     }
 }
 
-/// One slice of the donut, inset by `inset` so a stroke of twice that width rounds its corners.
+/// One tile of the donut, inset by `inset` so a stroke of twice that width rounds its corners.
+/// Its sides run parallel to the boundary between tiles, so every gap has the same width.
 struct RingSegment: Shape {
     let index: Int
     let count: Int
     var inset: CGFloat = 5
-    var gap: CGFloat = 5   // points between neighbouring tiles
 
     func path(in rect: CGRect) -> Path {
         let center = CGPoint(x: rect.midX, y: rect.midY)
         let outer = WheelGeometry.outer - inset, inner = WheelGeometry.inner + inset
-        let step = 360 / Double(count)
-        let middle = Double((outer + inner) / 2)
-        let gapDegrees = count > 1 ? Double(gap + inset * 2) / middle * 180 / .pi : 0
-        let start = WheelGeometry.angle(of: index, count: count) - step / 2 + gapDegrees / 2
-        let end = start + step - gapDegrees
-        let samples = max(8, Int(end - start) / 2)
+        let step = 2 * Double.pi / Double(count)
+        let middle = WheelGeometry.angle(of: index, count: count) * .pi / 180
+        let offset = count > 1 ? Double(WheelGeometry.gap / 2 + inset) : 0
 
-        func point(_ radius: CGFloat, _ degrees: Double) -> CGPoint {
-            let radians = degrees * .pi / 180
-            return CGPoint(x: center.x + radius * CGFloat(cos(radians)), y: center.y + radius * CGFloat(sin(radians)))
+        // A side `offset` points from the boundary ray meets a circle of this radius at these angles.
+        func ends(_ radius: CGFloat) -> (start: Double, end: Double) {
+            let shift = asin(min(1, offset / Double(radius)))
+            return (middle - step / 2 + shift, middle + step / 2 - shift)
+        }
+        func point(_ radius: CGFloat, _ radians: Double) -> CGPoint {
+            CGPoint(x: center.x + radius * CGFloat(cos(radians)), y: center.y + radius * CGFloat(sin(radians)))
         }
 
+        let rim = ends(outer), hub = ends(inner)
+        let samples = max(8, Int((rim.end - rim.start) * 180 / .pi / 2))
         var path = Path()
         for i in 0...samples {
-            let p = point(outer, start + (end - start) * Double(i) / Double(samples))
+            let p = point(outer, rim.start + (rim.end - rim.start) * Double(i) / Double(samples))
             if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
         }
         for i in (0...samples).reversed() {
-            path.addLine(to: point(inner, start + (end - start) * Double(i) / Double(samples)))
+            path.addLine(to: point(inner, hub.start + (hub.end - hub.start) * Double(i) / Double(samples)))
         }
         path.closeSubpath()
         return path
@@ -133,9 +148,15 @@ struct WheelView: View {
 
     private var wheel: some View {
         let count = model.actions.count
-        let labelRadius = (WheelGeometry.inner + WheelGeometry.outer) / 2
+        let labelRadius = WheelGeometry.labelRadius
         let side = WheelGeometry.outer * 2
-        let idle = Color(nsColor: .controlBackgroundColor).opacity(0.9)
+        // Opaque: a translucent fill shows where it overlaps the rounding stroke, like an inner outline.
+        // In dark mode the tiles are lifted above the glass so the gaps between them still show.
+        let idle = Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? NSColor(white: 0.19, alpha: 1) : NSColor.controlBackgroundColor
+        })
+        let fontSize = SegmentLabel.fontSize(for: model.actions, count: count)
 
         return ZStack {
             Circle()
@@ -155,7 +176,7 @@ struct WheelView: View {
                 let active = model.hovered == index
                 let radians = WheelGeometry.angle(of: index, count: count) * .pi / 180
                 let segment = RingSegment(index: index, count: count)
-                let fill = active ? Color.tangerine : idle
+                let fill = active ? Color.tangerineDeep : idle
 
                 segment
                     .fill(fill)
@@ -164,9 +185,8 @@ struct WheelView: View {
                     .compositingGroup()
                     .shadow(color: .black.opacity(active ? 0.25 : 0.08), radius: active ? 6 : 2, y: 1)
 
-                SegmentLabel(action: action, active: active, compact: count > 8)
+                SegmentLabel(action: action, active: active, fontSize: fontSize, width: WheelGeometry.labelWidth(count: count))
                     .position(x: side / 2 + labelRadius * CGFloat(cos(radians)), y: side / 2 + labelRadius * CGFloat(sin(radians)))
-                    .scaleEffect(active ? 1.06 : 1)
             }
 
             // The hub: file icon, or the hovered action's name like Tangerine.
@@ -192,7 +212,7 @@ struct WheelView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background(Capsule().fill(Color.tangerine))
+                        .background(Capsule().fill(Color.tangerineDeep))
                         .offset(x: 22, y: -22)
                 }
             }
@@ -202,24 +222,81 @@ struct WheelView: View {
     }
 }
 
-private struct SegmentLabel: View {
+struct SegmentLabel: View {
     let action: Action
     let active: Bool
-    let compact: Bool
+    let fontSize: CGFloat
+    let width: CGFloat
 
     var body: some View {
         VStack(spacing: 3) {
             if !action.symbol.isEmpty {
-                Image(systemName: action.symbol).font(.system(size: compact ? 11 : 13, weight: .semibold))
+                ActionSymbol(name: action.symbol, size: fontSize + 4)
             }
             Text(action.title.uppercased())
-                .font(.system(size: action.symbol.isEmpty ? 12 : (compact ? 7.5 : 8.5), weight: .bold))
+                .font(.system(size: fontSize, weight: .bold))
                 .tracking(0.2)
                 .lineLimit(1)
-                .minimumScaleFactor(0.6)
+                .fixedSize()
         }
-        .frame(width: compact ? 50 : 60)
+        .frame(width: width)
         .foregroundStyle(active ? Color.white : Color.primary)
+    }
+
+    /// One size for every label on a wheel: the largest at which the longest title fits its tile.
+    static func fontSize(for actions: [Action], count: Int) -> CGFloat {
+        let titles = actions.map { $0.title.uppercased() }
+        let room = WheelGeometry.labelWidth(count: count)
+        var size: CGFloat = actions.contains { !$0.symbol.isEmpty } ? 10 : 13
+        while size > 7, titles.contains(where: { width(of: $0, size: size) > room }) { size -= 0.5 }
+        return size
+    }
+
+    static func width(of title: String, size: CGFloat) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: size, weight: .bold)
+        return NSAttributedString(string: title, attributes: [.font: font, .kern: 0.2]).size().width
+    }
+}
+
+/// An action's icon: an SF Symbol, or a drawn glyph where SF Symbols has none (AirDrop).
+struct ActionSymbol: View {
+    let name: String
+    var size: CGFloat = 13
+
+    var body: some View {
+        if name == "airdrop" {
+            AirDropGlyph().frame(width: size * 1.25, height: size * 1.25)
+        } else {
+            Image(systemName: name).font(.system(size: size, weight: .semibold))
+        }
+    }
+}
+
+/// AirDrop's mark: three rings open at the bottom, with a wedge rising into their centre.
+struct AirDropGlyph: View {
+    var body: some View {
+        Canvas { context, canvas in
+            let side = min(canvas.width, canvas.height)
+            let center = CGPoint(x: canvas.width / 2, y: canvas.height / 2 - side * 0.04)
+            var rings = Path()
+            for radius in [0.13, 0.27, 0.41] {
+                // From lower left, over the top, to lower right (angles grow clockwise on screen).
+                for step in 0...48 {
+                    let degrees = 125 + 290 * Double(step) / 48
+                    let point = CGPoint(x: center.x + side * radius * CGFloat(cos(degrees * .pi / 180)),
+                                        y: center.y + side * radius * CGFloat(sin(degrees * .pi / 180)))
+                    if step == 0 { rings.move(to: point) } else { rings.addLine(to: point) }
+                }
+            }
+            context.stroke(rings, with: .foreground, style: StrokeStyle(lineWidth: side * 0.08, lineCap: .round, lineJoin: .round))
+            var wedge = Path()
+            wedge.move(to: CGPoint(x: center.x, y: center.y + side * 0.02))
+            wedge.addLine(to: CGPoint(x: center.x + side * 0.17, y: canvas.height / 2 + side * 0.48))
+            wedge.addLine(to: CGPoint(x: center.x - side * 0.17, y: canvas.height / 2 + side * 0.48))
+            wedge.closeSubpath()
+            context.fill(wedge, with: .foreground)
+        }
+        .accessibilityLabel("AirDrop")
     }
 }
 
@@ -236,7 +313,7 @@ private struct ModeBar: View {
                 .padding(.horizontal, 9)
                 .padding(.vertical, 5)
                 .foregroundStyle(item == mode ? Color.white : Color.secondary)
-                .background(Capsule().fill(item == mode ? Color.tangerine : Color.clear))
+                .background(Capsule().fill(item == mode ? Color.tangerineDeep : Color.clear))
             }
         }
         .padding(3)

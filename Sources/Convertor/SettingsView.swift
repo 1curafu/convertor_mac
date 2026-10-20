@@ -61,11 +61,12 @@ struct SettingsView: View {
                         launchAtLogin = SMAppService.mainApp.status == .enabled
                     }
                 ))
-                LabeledContent("ffmpeg") {
-                    Text(FFmpeg.path ?? "Not found – run scripts/build_app.sh or brew install ffmpeg")
-                        .foregroundStyle(.secondary)
+                LabeledContent("Extra formats") {
+                    // The path is for troubleshooting, so it lives in the tooltip rather than the label.
+                    Text(FFmpeg.isAvailable ? "Available" : "Not installed: MKV, WebM, OGG and others won't convert")
+                        .foregroundStyle(FFmpeg.isAvailable ? Color.secondary : Color.orange)
                         .lineLimit(2)
-                        .truncationMode(.middle)
+                        .help(FFmpeg.path.map { "ffmpeg at \($0)" } ?? "Rebuild with scripts/build_app.sh, or run brew install ffmpeg.")
                 }
             }
         }

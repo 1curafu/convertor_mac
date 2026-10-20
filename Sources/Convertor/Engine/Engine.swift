@@ -10,9 +10,7 @@ enum Engine {
             if [FileKind.archive, .folder, .other].contains(kind) {
                 return [try await ArchiveEngine.pack(urls, as: ext)]
             }
-            var outputs: [URL] = []
-            for url in urls { outputs += try await convert(url, to: ext) }
-            return outputs
+            return try await each(urls) { try await convert($0, to: ext) }
 
         case .tool(let tool):
             switch tool {
@@ -25,14 +23,31 @@ enum Engine {
             case .zip:
                 return [try await ArchiveEngine.pack(urls, as: "zip")]
             default:
-                var outputs: [URL] = []
-                for url in urls { outputs.append(try await apply(tool, to: url)) }
-                return outputs
+                return try await each(urls) { [try await apply(tool, to: $0)] }
             }
 
         case .file:
             throw ConvertError("File actions are handled by FileActions")
         }
+    }
+
+    /// Runs `work` on every file, carrying on past failures. If any failed, the error says how many
+    /// results were saved, so a multi-file job never hides what it did write.
+    private static func each(_ urls: [URL], _ work: (URL) async throws -> [URL]) async throws -> [URL] {
+        var outputs: [URL] = []
+        var failures: [(name: String, error: Error)] = []
+        for url in urls {
+            try Task.checkCancellation()
+            do { outputs += try await work(url) } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                failures.append((url.lastPathComponent, error))
+            }
+        }
+        guard let first = failures.first else { return outputs }
+        if urls.count == 1 { throw first.error }
+        throw ConvertError("Saved \(urls.count - failures.count) of \(urls.count). "
+            + failures.map { "\($0.name): \($0.error.localizedDescription)" }.joined(separator: " · "))
     }
 
     private static func convert(_ url: URL, to ext: String) async throws -> [URL] {
@@ -48,8 +63,7 @@ enum Engine {
                (try? await IWork.export(url, with: .numbers, as: .pdf, to: out)) != nil {
                 return [out]
             }
-            try await Spreadsheet.write(try await Spreadsheet.read(url), to: out, ext: ext)
-            return [out]
+            return try await Spreadsheet.write(try await Spreadsheet.read(url), to: out, ext: ext)
         case .subtitle: return [try TextEngine.convertSubtitles(url, to: ext)]
         case .archive, .folder, .other: return [try await ArchiveEngine.pack([url], as: ext)]
         }
@@ -60,11 +74,18 @@ enum Engine {
         let kind = FileKind.of(url)
         switch tool {
         case .compress:
+            let out: URL
             switch kind {
-            case .image: return try ImageEngine.compress(url)
-            case .pdf: return try DocumentEngine.compressPDF(url)
-            default: return try await MediaEngine.compress(url)
+            case .image: out = try ImageEngine.compress(url)
+            case .pdf: out = try DocumentEngine.compressPDF(url)
+            default: out = try await MediaEngine.compress(url)
             }
+            // Already-optimised files can come out bigger; keep the original as the smaller copy.
+            if let before = Output.fileSize(url), let after = Output.fileSize(out), after >= before {
+                try? FileManager.default.removeItem(at: out)
+                throw ConvertError("Already as small as it gets: compressing made it bigger, so nothing was saved")
+            }
+            return out
         case .mute: return try await MediaEngine.mute(url)
         case .normalize: return try await MediaEngine.normalize(url)
         case .split where kind == .pdf: return try DocumentEngine.splitPDF(url)

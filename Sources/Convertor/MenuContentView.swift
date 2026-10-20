@@ -16,9 +16,12 @@ struct MenuContentView: View {
                 Circle().fill(Color.tangerine).frame(width: 12, height: 12)
                 Text("Convertor").font(.headline)
                 Spacer()
-                Text(FFmpeg.isAvailable ? "ffmpeg ✓" : "no ffmpeg")
-                    .font(.caption2)
-                    .foregroundStyle(FFmpeg.isAvailable ? Color.secondary : Color.orange)
+                if !FFmpeg.isAvailable {
+                    Text("Some formats unavailable")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .help("ffmpeg wasn't found, so formats Apple can't read or write (MKV, WebM, OGG, …) won't convert.")
+                }
             }
 
             Text("Drag a file, tap ⇧ and drop it on a format.\n⌘ opens tools, ⌃ opens actions.")
@@ -55,7 +58,12 @@ struct MenuContentView: View {
             .foregroundStyle(targeted ? Color.tangerine : Color.secondary.opacity(0.5))
             .background(RoundedRectangle(cornerRadius: 12).fill(targeted ? Color.tangerine.opacity(0.08) : .clear))
             .frame(height: 80)
-            .overlay(Text("…or drop files here").font(.callout).foregroundStyle(.secondary))
+            .overlay {
+                VStack(spacing: 4) {
+                    Text("…or drop files here").font(.callout).foregroundStyle(.secondary)
+                    Button("Choose Files…", action: chooseFiles).buttonStyle(.link).font(.callout)
+                }
+            }
             .onDrop(of: [.fileURL], isTargeted: $targeted) { providers in
                 for provider in providers {
                     _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -65,6 +73,15 @@ struct MenuContentView: View {
                 }
                 return true
             }
+    }
+
+    private func chooseFiles() {
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = true
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        dropped = panel.urls
     }
 
     private var picker: some View {
@@ -96,7 +113,7 @@ struct MenuContentView: View {
                         center.perform(action, on: dropped)
                     } label: {
                         VStack(spacing: 3) {
-                            if !action.symbol.isEmpty { Image(systemName: action.symbol) }
+                            if !action.symbol.isEmpty { ActionSymbol(name: action.symbol) }
                             Text(action.title).font(.system(size: 10, weight: .semibold)).lineLimit(1)
                         }
                         .frame(maxWidth: .infinity, minHeight: 40)
@@ -124,14 +141,27 @@ private struct JobRow: View {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).frame(width: 16)
             case .failed:
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).frame(width: 16)
+            case .cancelled:
+                Image(systemName: "minus.circle.fill").foregroundStyle(.secondary).frame(width: 16)
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(job.title).font(.caption).lineLimit(1).truncationMode(.middle)
                 if case .failed(let message) = job.state {
-                    Text(message).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                    Text(message).font(.caption2).foregroundStyle(.secondary).lineLimit(2).help(message)
+                } else if case .cancelled = job.state {
+                    Text("Cancelled").font(.caption2).foregroundStyle(.secondary)
                 }
             }
             Spacer(minLength: 0)
+            if case .running = job.state {
+                Button {
+                    ConversionCenter.shared.cancel(job.id)
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("Stop")
+            }
             if case .done(let outputs) = job.state {
                 Button {
                     NSWorkspace.shared.activateFileViewerSelecting(outputs)
