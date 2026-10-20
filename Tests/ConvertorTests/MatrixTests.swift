@@ -238,7 +238,9 @@ final class MatrixTests: XCTestCase {
         case .archive:
             guard let folder = try? await ArchiveEngine.extract(output) else { return "can't extract" }
             let found = FileManager.default.enumerator(atPath: folder.path)?.allObjects.compactMap { $0 as? String } ?? []
-            return found.contains { $0.hasSuffix("inside.txt") } ? nil : "archive is missing inside.txt (\(found))"
+            // A zipped folder or archive holds inside.txt; a zipped file holds itself.
+            let expected = [.folder, .archive].contains(sourceKind) ? "inside.txt" : source.lastPathComponent
+            return found.contains { $0.hasSuffix(expected) } ? nil : "archive is missing \(expected) (\(found))"
 
         default:
             let text: String
