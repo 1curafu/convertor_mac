@@ -160,6 +160,8 @@ struct WheelView: View {
                 segment
                     .fill(fill)
                     .overlay(segment.stroke(fill, style: StrokeStyle(lineWidth: segment.inset * 2, lineJoin: .round)))
+                    // Flatten fill + rounding stroke first, or the stroke's shadow draws a second outline inside.
+                    .compositingGroup()
                     .shadow(color: .black.opacity(active ? 0.25 : 0.08), radius: active ? 6 : 2, y: 1)
 
                 SegmentLabel(action: action, active: active, compact: count > 8)

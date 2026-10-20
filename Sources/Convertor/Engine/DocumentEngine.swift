@@ -116,8 +116,19 @@ enum DocumentEngine {
         info.isHorizontallyCentered = false
         info.isVerticallyCentered = false
 
+        // Paper is white whatever the Mac's theme. Text with no colour of its own (most Word
+        // documents) would otherwise take the dark-mode text colour, white, and vanish.
+        let printable = NSMutableAttributedString(attributedString: text.length > 0 ? text : NSAttributedString(string: " "))
+        let whole = NSRange(location: 0, length: printable.length)
+        printable.enumerateAttribute(.foregroundColor, in: whole) { value, range, _ in
+            if value == nil { printable.addAttribute(.foregroundColor, value: NSColor.black, range: range) }
+        }
+        let light = NSAppearance(named: .aqua)
+
         let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 612 - 108, height: 1))
-        textView.textStorage?.setAttributedString(text.length > 0 ? text : NSAttributedString(string: " "))
+        textView.appearance = light
+        textView.drawsBackground = false
+        textView.textStorage?.setAttributedString(printable)
         textView.isVerticallyResizable = true
         if let container = textView.textContainer { textView.layoutManager?.ensureLayout(for: container) }
         textView.sizeToFit()
@@ -125,7 +136,9 @@ enum DocumentEngine {
         let operation = NSPrintOperation(view: textView, printInfo: info)
         operation.showsPrintPanel = false
         operation.showsProgressPanel = false
-        guard operation.run(), FileManager.default.fileExists(atPath: output.path) else {
+        var printed = false
+        (light ?? NSAppearance.currentDrawing()).performAsCurrentDrawingAppearance { printed = operation.run() }
+        guard printed, FileManager.default.fileExists(atPath: output.path) else {
             throw ConvertError("Couldn't create the PDF")
         }
     }

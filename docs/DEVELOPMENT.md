@@ -4,7 +4,8 @@ User documentation is in the [README](../README.md).
 
 ## Build
 
-Requires **macOS 26** and Xcode 26 (or its Command Line Tools).
+Requires **macOS 26** and the full **Xcode** app (26 or newer). The standalone Command Line Tools
+can't build it: SwiftUI's macros (`@State`, …) need plugins that only Xcode includes.
 
 ```sh
 scripts/build_app.sh --install

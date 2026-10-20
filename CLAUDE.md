@@ -7,7 +7,7 @@ docs/DEVELOPMENT.md covers build options, architecture and tests.
 ## Build and test
 
 ```sh
-swift build                                   # compile (needs macOS 26 + Xcode 26)
+swift build                                   # compile (needs macOS 26 + full Xcode, not just the CLT)
 CONVERTOR_FFMPEG=/path/to/ffmpeg swift test   # end-to-end tests; media tests skip without ffmpeg
 scripts/build_app.sh [--install]              # build/Convertor.app with a static ffmpeg bundled
 ```
