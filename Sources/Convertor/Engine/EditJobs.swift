@@ -59,7 +59,7 @@ enum EditJobs {
         for url in urls {
             switch FileKind.of(url) {
             case .image: outputs.append(try ImageEdits.stripMetadata(url))
-            case .pdf: outputs.append(try pdfMetadata(url, fields: [:], removeAll: true))
+            case .pdf: outputs.append(try await pdfMetadata(url, fields: [:], removeAll: true))
             default: outputs.append(try await MediaEdits.writeMetadata(url, fields: [:], removeAll: true))
             }
         }
@@ -70,7 +70,8 @@ enum EditJobs {
         ("Title", .titleAttribute), ("Author", .authorAttribute), ("Subject", .subjectAttribute), ("Keywords", .keywordsAttribute),
     ]
 
-    static func pdfMetadata(_ url: URL, fields: [String: String], removeAll: Bool) throws -> URL {
+    /// Async so it runs off the main actor even when an editor calls it: big PDFs take a while.
+    static func pdfMetadata(_ url: URL, fields: [String: String], removeAll: Bool) async throws -> URL {
         guard let document = PDFDocument(url: url) else { throw ConvertError("Can't open \(url.lastPathComponent)") }
         var attributes: [AnyHashable: Any] = removeAll ? [:] : (document.documentAttributes ?? [:])
         if !removeAll {

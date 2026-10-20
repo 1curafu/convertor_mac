@@ -113,7 +113,7 @@ struct MetadataEditor: View {
         case .image:
             context.save("Metadata") { try await EditJobs.imageMetadata(url, image, removeLocation: removeLocation) }
         case .pdf:
-            context.save("Metadata") { [try EditJobs.pdfMetadata(url, fields: fields, removeAll: false)] }
+            context.save("Metadata") { [try await EditJobs.pdfMetadata(url, fields: fields, removeAll: false)] }
         default:
             context.save("Metadata") { [try await MediaEdits.writeMetadata(url, fields: fields, removeAll: false)] }
         }
@@ -167,7 +167,7 @@ struct OrganizePDFEditor: View {
             self.document = document
             pages = (0..<document.pageCount).map { PageItem(index: $0) }
             for index in 0..<document.pageCount {
-                thumbnails[index] = document.page(at: index)?.thumbnail(of: CGSize(width: 240, height: 300), for: .mediaBox)
+                thumbnails[index] = document.page(at: index)?.thumbnail(of: CGSize(width: 240, height: 300), for: .cropBox)
             }
         }
     }

@@ -139,7 +139,11 @@ final class ConvertorTests: XCTestCase {
             exists(try await ImageEngine.convert(png, to: "webp"))
             exists(try await ImageEngine.convert(png, to: "avif"))
         }
-        exists(try ImageEngine.compress(try makePNG("transparent.png", alpha: true)))
+        let transparent = try ImageEngine.compress(try makePNG("transparent.png", alpha: true))
+        exists(transparent)
+        XCTAssertEqual(transparent.pathExtension, "heic")
+        // An alpha channel that's opaque everywhere (like a screenshot) still compresses to JPEG.
+        XCTAssertEqual(try ImageEngine.compress(try makePNG("opaque.png")).pathExtension, "jpg")
     }
 
     func testImageEdits() async throws {
@@ -178,6 +182,11 @@ final class ConvertorTests: XCTestCase {
             let tagged = try await EditJobs.imageMetadata(source, metadata, removeLocation: true)[0]
             XCTAssertEqual(ImageEdits.readMetadata(tagged).author, "Convertor Tests", source.pathExtension)
             XCTAssertEqual(ImageEdits.readMetadata(tagged).title, "Sunset", source.pathExtension)
+
+            // Removing metadata copies the compressed data instead of re-encoding at full quality.
+            let clean = try ImageEdits.stripMetadata(tagged)
+            XCTAssertEqual(ImageEdits.readMetadata(clean), ImageEdits.Metadata(), source.pathExtension)
+            XCTAssertLessThanOrEqual(Output.fileSize(clean) ?? .max, Output.fileSize(tagged) ?? 0, source.pathExtension)
         }
     }
 
@@ -201,6 +210,44 @@ final class ConvertorTests: XCTestCase {
         let pdf = Output.file(for: csv, ext: "pdf")
         try await Spreadsheet.write(original, to: pdf, ext: "pdf")
         exists(pdf)
+
+        // 17-digit IDs would lose digits as numbers.
+        let ids = file("ids.csv")
+        try "ID\n12345678901234567\n".write(to: ids, atomically: true, encoding: .utf8)
+        let idsXLSX = Output.file(for: ids, ext: "xlsx")
+        try await Spreadsheet.write(try await Spreadsheet.read(ids), to: idsXLSX, ext: "xlsx")
+        XCTAssertEqual(try await Spreadsheet.read(idsXLSX).sheets[0].rows[1], ["12345678901234567"])
+    }
+
+    /// Excel stores dates as day counts; the cell's number format is what makes them dates.
+    func testXLSXDatesReadAsDates() async throws {
+        let main = "xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\""
+        let rels = "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""
+        let files: [(path: String, data: Data)] = [
+            ("[Content_Types].xml", Data("""
+                <?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\
+                <Default Extension="xml" ContentType="application/xml"/></Types>
+                """.utf8)),
+            ("xl/workbook.xml", Data("<workbook \(main) \(rels)><sheets><sheet name=\"Dates\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>".utf8)),
+            ("xl/_rels/workbook.xml.rels", Data("""
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\
+                <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" \
+                Target="worksheets/sheet1.xml"/></Relationships>
+                """.utf8)),
+            ("xl/styles.xml", Data("""
+                <styleSheet \(main)><numFmts count="1"><numFmt numFmtId="164" formatCode="dd/mm/yyyy\\ hh:mm"/></numFmts>\
+                <cellXfs count="3"><xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="164"/></cellXfs></styleSheet>
+                """.utf8)),
+            ("xl/worksheets/sheet1.xml", Data("""
+                <worksheet \(main)><sheetData><row r="1"><c r="A1"><v>45413</v></c><c r="B1" s="1"><v>45413</v></c>\
+                <c r="C1" s="2"><v>45413.5</v></c></row></sheetData></worksheet>
+                """.utf8)),
+        ]
+        let url = file("dates.xlsx")
+        try? FileManager.default.removeItem(at: url)
+        try await ZipPackage.write(files, to: url)
+        let row = try await Spreadsheet.read(url).sheets[0].rows[0]
+        XCTAssertEqual(row, ["45413", "2024-05-01", "2024-05-01 12:00:00"])
     }
 
     // MARK: Documents
@@ -243,7 +290,7 @@ final class ConvertorTests: XCTestCase {
         let organized = try await EditJobs.organizePDF(pdf, pages: [(0, 90), (0, 0)])[0]
         XCTAssertEqual(PDFDocument(url: organized)?.pageCount, 2)
         XCTAssertEqual(PDFDocument(url: organized)?.page(at: 0)?.rotation, 90)
-        let tagged = try EditJobs.pdfMetadata(pdf, fields: ["Title": "Report", "Author": "Tests"], removeAll: false)
+        let tagged = try await EditJobs.pdfMetadata(pdf, fields: ["Title": "Report", "Author": "Tests"], removeAll: false)
         XCTAssertEqual(PDFDocument(url: tagged)?.documentAttributes?[PDFDocumentAttribute.titleAttribute.rawValue] as? String, "Report")
     }
 
@@ -273,6 +320,11 @@ final class ConvertorTests: XCTestCase {
         XCTAssertTrue(content.contains("00:00:01.000 --> 00:00:02.500"))
         let back = try TextEngine.convertSubtitles(vtt, to: "srt")
         XCTAssertTrue(try String(contentsOf: back, encoding: .utf8).contains("2\n00:00:03,000 --> 00:00:04,000\nWorld"))
+
+        let latin = file("latin.srt")
+        try "1\n00:00:01,000 --> 00:00:02,000\nCafé crème\n".write(to: latin, atomically: true, encoding: .isoLatin1)
+        let converted = try TextEngine.convertSubtitles(latin, to: "vtt")
+        XCTAssertTrue(try String(contentsOf: converted, encoding: .utf8).contains("Café crème"))
     }
 
     func testArchives() async throws {
@@ -299,8 +351,11 @@ final class ConvertorTests: XCTestCase {
                       documentAttributes: [.documentType: NSAttributedString.DocumentType.officeOpenXML]).write(to: docx)
 
         let pdf = try await DocumentEngine.convert(docx, to: "pdf")[0]
-        let page = try XCTUnwrap(PDFDocument(url: pdf)?.page(at: 0))
+        let document = try XCTUnwrap(PDFDocument(url: pdf))
+        let page = try XCTUnwrap(document.page(at: 0))
         XCTAssertTrue(page.string?.contains("Dark mode must not hide") == true)
+        XCTAssertEqual(document.pageCount, 1, "a trailing line break must not add a blank page")
+        XCTAssertEqual(document.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String, Output.baseName(pdf))
 
         // The text has to be visible: count dark pixels on the rendered page.
         let image = try XCTUnwrap(PDFText.render(page, dpi: 72))

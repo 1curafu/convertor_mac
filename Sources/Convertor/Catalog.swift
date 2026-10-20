@@ -80,7 +80,7 @@ enum Tool: String, Hashable {
     /// offered for single files; the rest apply the same settings to every selected file.
     func worksOnSelections(of kind: FileKind) -> Bool {
         switch self {
-        case .annotate, .redact, .trim, .snapshot, .bleep: return false
+        case .annotate, .redact, .trim, .snapshot, .bleep, .organize: return false
         case .split, .crop: return kind != .video
         default: return true
         }

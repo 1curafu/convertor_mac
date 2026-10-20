@@ -37,7 +37,7 @@ enum ImageEngine {
     /// One-tap compression: JPEG (or HEIC when there's transparency) at the compression quality.
     static func compress(_ url: URL) throws -> URL {
         let (image, props) = try load(url)
-        let target = hasAlpha(image) ? "heic" : "jpg"
+        let target = usesTransparency(image) ? "heic" : "jpg"
         let out = Output.file(for: url, suffix: " compressed", ext: target)
         try write(image, to: out, ext: target, quality: compressQuality, metadata: props)
         return out
@@ -110,6 +110,21 @@ enum ImageEngine {
         case .none, .noneSkipFirst, .noneSkipLast: return false
         default: return true
         }
+    }
+
+    /// Whether any pixel is actually see-through. Screenshots and many PNGs carry an alpha
+    /// channel that is opaque everywhere.
+    static func usesTransparency(_ image: CGImage) -> Bool {
+        guard hasAlpha(image) else { return false }
+        let width = image.width, height = image.height
+        guard let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                  space: sRGB, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let data = ctx.data
+        else { return true }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let bytes = data.bindMemory(to: UInt8.self, capacity: width * height * 4)
+        for index in stride(from: 3, to: width * height * 4, by: 4) where bytes[index] < 255 { return true }
+        return false
     }
 
     static let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!

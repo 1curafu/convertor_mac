@@ -58,8 +58,7 @@ enum Engine {
                (try? await IWork.export(url, with: .numbers, as: .pdf, to: out)) != nil {
                 return [out]
             }
-            try await Spreadsheet.write(try await Spreadsheet.read(url), to: out, ext: ext)
-            return [out]
+            return try await Spreadsheet.write(try await Spreadsheet.read(url), to: out, ext: ext)
         case .subtitle: return [try TextEngine.convertSubtitles(url, to: ext)]
         case .archive, .folder, .other: return [try await ArchiveEngine.pack([url], as: ext)]
         }

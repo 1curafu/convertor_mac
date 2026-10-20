@@ -258,7 +258,7 @@ final class MatrixTests: XCTestCase {
     /// iWork targets need the app; on machines without it the error must say so clearly.
     private func isMissingApp(_ error: Error) -> Bool {
         let message = error.localizedDescription
-        return ["Pages is needed", "Keynote is needed", "Numbers is needed", "free on the Mac App Store"].contains { message.contains($0) }
+        return ["Pages is needed", "Keynote is needed", "Numbers is needed", "LibreOffice is needed", "free on the Mac App Store"].contains { message.contains($0) }
     }
 
     private func run(_ action: Action, on urls: [URL], label: String) async {
