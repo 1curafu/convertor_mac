@@ -8,6 +8,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# SwiftUI's @State and friends are macros whose plugins ship only with the full Xcode app,
+# so the standalone Command Line Tools fail with "plugin for module 'SwiftUIMacros' not found".
+if [[ "$(xcode-select -p 2>/dev/null)" == *CommandLineTools* ]]; then
+  echo "✗ Xcode is required: the Command Line Tools can't compile SwiftUI apps."
+  echo "  1. Install Xcode from the Mac App Store and open it once."
+  echo "  2. sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
+  echo "  3. Run this script again."
+  exit 1
+fi
+
 APP=build/Convertor.app
 CACHE=build/cache
 

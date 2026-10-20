@@ -6,13 +6,15 @@ Convertor converts and edits files without opening any app. It lives in the menu
 
 ## Install
 
-1. On a Mac with macOS 26 and Xcode 26 (or its Command Line Tools), run:
+1. Install **Xcode** from the Mac App Store (the Command Line Tools alone aren't enough), open it once,
+   then run `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`.
+2. On a Mac with macOS 26 or newer, run:
    ```sh
    git clone -b main https://github.com/1curafu/convertor_mac && cd convertor_mac
    scripts/build_app.sh --install
    ```
-2. Convertor opens and appears in the menu bar. It has no Dock icon.
-3. Optional: open **Settings → Launch at login** so it's always ready.
+3. Convertor opens and appears in the menu bar. It has no Dock icon.
+4. Optional: open **Settings → Launch at login** so it's always ready.
 
 ## The basic move
 
@@ -163,6 +165,7 @@ Open from the menu bar window → **Settings…**
 | Problem | Fix |
 |---|---|
 | The wheel doesn't appear | Check the gesture is on in Settings, and that you tap the key *while* dragging (after the file starts moving). Dragging inside Convertor's own windows doesn't open the wheel. |
+| Build fails with `plugin for module 'SwiftUIMacros' not found` | You're building with the Command Line Tools. Install Xcode and run `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`. |
 | "This format needs ffmpeg" | Rebuild with `scripts/build_app.sh` (it bundles ffmpeg) or run `brew install ffmpeg`. |
 | "Pages/Keynote/Numbers is needed" | Install it from the Mac App Store (free). For slides and spreadsheets, LibreOffice works too. |
 | "Allow Convertor to control …" | Turn it on in System Settings → Privacy & Security → Automation. |
