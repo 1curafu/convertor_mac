@@ -264,6 +264,36 @@ final class ConvertorTests: XCTestCase {
         }
     }
 
+    /// Word → PDF in dark mode used to print white text on white paper.
+    @MainActor
+    func testWordToPDFIsReadableInDarkMode() async throws {
+        let previous = NSApp.appearance
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        defer { NSApp.appearance = previous }
+
+        // A .docx whose text has no colour of its own, like most Word files.
+        let docx = file("dark-mode.docx")
+        let text = NSAttributedString(string: "Dark mode must not hide this paragraph.\nSecond line of plain text.",
+                                      attributes: [.font: NSFont(name: "Helvetica", size: 18)!])
+        try text.data(from: NSRange(location: 0, length: text.length),
+                      documentAttributes: [.documentType: NSAttributedString.DocumentType.officeOpenXML]).write(to: docx)
+
+        let pdf = try await DocumentEngine.convert(docx, to: "pdf")[0]
+        let page = try XCTUnwrap(PDFDocument(url: pdf)?.page(at: 0))
+        XCTAssertTrue(page.string?.contains("Dark mode must not hide") == true)
+
+        // The text has to be visible: count dark pixels on the rendered page.
+        let image = try XCTUnwrap(PDFText.render(page, dpi: 72))
+        let rep = NSBitmapImageRep(cgImage: image)
+        var dark = 0
+        for x in stride(from: 0, to: rep.pixelsWide, by: 2) {
+            for y in stride(from: 0, to: rep.pixelsHigh, by: 2) {
+                if let color = rep.colorAt(x: x, y: y), color.brightnessComponent < 0.4 { dark += 1 }
+            }
+        }
+        XCTAssertGreaterThan(dark, 50, "the PDF page is blank: text was drawn white")
+    }
+
     // MARK: Review regressions
 
     func testSelectionsOnlyOfferSelectionTools() {
