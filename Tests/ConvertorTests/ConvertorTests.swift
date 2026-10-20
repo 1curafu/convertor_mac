@@ -108,6 +108,26 @@ final class ConvertorTests: XCTestCase {
         XCTAssertNil(WheelGeometry.segment(at: c, count: 4))                                      // hub cancels
     }
 
+    /// Every wheel's labels share one readable size at which each title fits inside its tile.
+    func testWheelLabelsFitTheirTiles() {
+        for ext in ["png", "mov", "mp3", "pdf", "docx", "pptx", "xlsx", "epub", "srt", "zip"] {
+            let one = URL(fileURLWithPath: "/tmp/a.\(ext)"), two = URL(fileURLWithPath: "/tmp/b.\(ext)")
+            for urls in [[one], [one, two]] {
+                for mode in Mode.allCases {
+                    let actions = Catalog.actions(for: urls, mode: mode)
+                    guard !actions.isEmpty else { continue }
+                    let size = SegmentLabel.fontSize(for: actions, count: actions.count)
+                    let room = WheelGeometry.labelWidth(count: actions.count)
+                    XCTAssertGreaterThanOrEqual(size, 8, "\(urls.count) × \(ext), \(mode)")
+                    for action in actions {
+                        XCTAssertLessThanOrEqual(SegmentLabel.width(of: action.title.uppercased(), size: size), room,
+                                                 "\(action.title) on \(urls.count) × \(ext), \(mode)")
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: Images
 
     func testImageConversions() async throws {
