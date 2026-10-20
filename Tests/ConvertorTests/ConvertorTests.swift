@@ -307,15 +307,14 @@ final class ConvertorTests: XCTestCase {
     /// The panel stays open when asked twice (a double click) and closes on request.
     @MainActor
     func testStatusItemPanel() async throws {
-        NSApp.setActivationPolicy(.accessory)  // as the app does at launch; a transient popover needs an active app
+        NSApp.setActivationPolicy(.accessory)
         let controller = StatusItemController()
         for _ in 0..<30 where !controller.isInMenuBar { try await Task.sleep(for: .milliseconds(100)) }
         guard controller.isInMenuBar else { throw XCTSkip("the menu bar didn't place the icon in this session") }
         controller.openPanel()
         controller.openPanel()
         try await Task.sleep(for: .milliseconds(300))
-        XCTAssertTrue(controller.popover.isShown, "active: \(NSApp.isActive), policy: \(NSApp.activationPolicy().rawValue), "
-                      + "icon window visible: \(controller.statusWindowVisible)")
+        XCTAssertTrue(controller.popover.isShown, "the panel should stay open while the app isn't active (CI can't activate it)")
         controller.closePanel()
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertFalse(controller.popover.isShown)

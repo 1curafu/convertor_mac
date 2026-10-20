@@ -1,13 +1,13 @@
 import AppKit
 import SwiftUI
 
-/// The menu bar icon. A click opens the Convertor panel; a right-click or ⌃-click opens a short menu
-/// with Settings and Quit. A double click keeps the panel open instead of opening and closing it.
+/// The menu bar icon. A click opens the Convertor panel and a second click closes it; a double click
+/// leaves it open. A right-click or ⌃-click opens a short menu with Settings and Quit.
 @MainActor
 final class StatusItemController: NSObject, NSPopoverDelegate {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     let popover = NSPopover()
-    private var closedAt = Date.distantPast
+    private var monitors: [Any] = []
 
     override init() {
         super.init()
@@ -15,8 +15,9 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             .environmentObject(ConversionCenter.shared))
         hosting.sizingOptions = [.preferredContentSize]
         popover.contentViewController = hosting
-        popover.behavior = .transient
-        popover.animates = false  // so a double click's second press can't catch it half closed
+        // Not .transient: that closes on the icon's own mouse-down (so a click would reopen it) and
+        // whenever the app isn't active. The panel closes on clicks elsewhere instead (see openPanel).
+        popover.behavior = .applicationDefined
         popover.delegate = self
 
         guard let button = item.button else { return }
@@ -34,8 +35,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             openPanel()
         } else if popover.isShown {
             closePanel()
-        } else if Date().timeIntervalSince(closedAt) > 0.3 {
-            // A transient popover already closes on the mouse-down of the click that would toggle it.
+        } else {
             openPanel()
         }
     }
@@ -45,15 +45,40 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
+
+        let outside = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            MainActor.assumeIsolated { self?.closePanel() }
+        }
+        let inside = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { [weak self] event in
+            let swallow = MainActor.assumeIsolated { self?.closeIfOutside(event) ?? false }
+            return swallow ? nil : event
+        }
+        monitors = [outside, inside].compactMap { $0 }
+    }
+
+    /// Closes the panel on Escape (swallowing the key) or a click in another of the app's windows.
+    /// Clicks on the icon itself are left to `clicked`.
+    private func closeIfOutside(_ event: NSEvent) -> Bool {
+        if event.type == .keyDown {
+            guard event.keyCode == 53 else { return false }
+            closePanel()
+            return true
+        }
+        if event.window !== popover.contentViewController?.view.window && event.window !== item.button?.window {
+            closePanel()
+        }
+        return false
     }
 
     func closePanel() { popover.performClose(nil) }
 
-    /// False until the menu bar has placed the icon (or when macOS hides it from the menu bar).
-    var isInMenuBar: Bool { item.button?.window != nil }
-    var statusWindowVisible: Bool { item.button?.window?.isVisible == true }
+    func popoverDidClose(_ notification: Notification) {
+        monitors.forEach(NSEvent.removeMonitor)
+        monitors = []
+    }
 
-    func popoverDidClose(_ notification: Notification) { closedAt = Date() }
+    /// False until the menu bar has placed the icon.
+    var isInMenuBar: Bool { item.button?.window != nil }
 
     private func showMenu() {
         guard let button = item.button else { return }
