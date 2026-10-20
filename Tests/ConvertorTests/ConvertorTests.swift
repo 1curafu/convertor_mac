@@ -296,10 +296,20 @@ final class ConvertorTests: XCTestCase {
 
     // MARK: Review regressions
 
-    /// The menu bar icon's panel stays open when asked twice (a double click), and its menu can quit.
+    /// The menu bar icon's menu can open Settings and quit.
     @MainActor
-    func testStatusItemPanelAndMenu() async throws {
+    func testStatusItemMenu() {
+        let items = StatusItemController().menu().items
+        XCTAssertEqual(items.map(\.title), ["Open Convertor", "Settings…", "", "Quit Convertor"])
+        XCTAssertEqual(items.last?.action, #selector(NSApplication.terminate(_:)))
+    }
+
+    /// The panel stays open when asked twice (a double click) and closes on request.
+    @MainActor
+    func testStatusItemPanel() async throws {
         let controller = StatusItemController()
+        for _ in 0..<30 where !controller.isInMenuBar { try await Task.sleep(for: .milliseconds(100)) }
+        guard controller.isInMenuBar else { throw XCTSkip("the menu bar didn't place the icon in this session") }
         controller.openPanel()
         controller.openPanel()
         try await Task.sleep(for: .milliseconds(300))
@@ -307,10 +317,6 @@ final class ConvertorTests: XCTestCase {
         controller.closePanel()
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertFalse(controller.popover.isShown)
-
-        let items = controller.menu().items
-        XCTAssertEqual(items.map(\.title), ["Open Convertor", "Settings…", "", "Quit Convertor"])
-        XCTAssertEqual(items.last?.action, #selector(NSApplication.terminate(_:)))
     }
 
     func testSelectionsOnlyOfferSelectionTools() {

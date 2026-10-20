@@ -147,6 +147,7 @@ final class SnapshotTests: XCTestCase {
 
         // The real panel, opened from the menu bar icon.
         let controller = StatusItemController()
+        for _ in 0..<30 where !controller.isInMenuBar { try await Task.sleep(for: .milliseconds(100)) }
         controller.openPanel()
         try await Task.sleep(for: .milliseconds(600))
         if let panel = controller.popover.contentViewController?.view.window { try await capture(panel, as: "menu-panel") }
