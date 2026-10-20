@@ -296,6 +296,30 @@ final class ConvertorTests: XCTestCase {
 
     // MARK: Review regressions
 
+    /// The menu bar icon's menu can open Settings and quit.
+    @MainActor
+    func testStatusItemMenu() {
+        let items = StatusItemController().menu().items
+        XCTAssertEqual(items.map(\.title), ["Open Convertor", "Settings…", "", "Quit Convertor"])
+        XCTAssertEqual(items.last?.action, #selector(NSApplication.terminate(_:)))
+    }
+
+    /// The panel stays open when asked twice (a double click) and closes on request.
+    @MainActor
+    func testStatusItemPanel() async throws {
+        NSApp.setActivationPolicy(.accessory)
+        let controller = StatusItemController()
+        for _ in 0..<30 where !controller.isInMenuBar { try await Task.sleep(for: .milliseconds(100)) }
+        guard controller.isInMenuBar else { throw XCTSkip("no menu bar in this session (headless CI)") }
+        controller.openPanel()
+        controller.openPanel()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(controller.popover.isShown)
+        controller.closePanel()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertFalse(controller.popover.isShown)
+    }
+
     func testSelectionsOnlyOfferSelectionTools() {
         let images = [URL(fileURLWithPath: "/tmp/a.png"), URL(fileURLWithPath: "/tmp/b.png")]
         let tools = Catalog.actions(for: images, mode: .tools).map(\.title)

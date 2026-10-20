@@ -3,6 +3,8 @@ import UniformTypeIdentifiers
 
 /// The menu bar window: a drop zone fallback for the gesture plus recent results.
 struct MenuContentView: View {
+    /// Closes the menu bar panel holding this view.
+    var close: () -> Void = {}
     @EnvironmentObject private var center: ConversionCenter
     @State private var dropped: [URL] = []
     @State private var mode: Mode = .convert
@@ -33,9 +35,13 @@ struct MenuContentView: View {
 
             Divider()
             HStack {
-                settingsButton
+                Button("Settings…") {
+                    close()
+                    SettingsWindow.show()
+                }
                 Spacer()
-                Button("Quit") { NSApp.terminate(nil) }
+                Button("Quit Convertor") { NSApp.terminate(nil) }
+                    .keyboardShortcut("q")
             }
             .buttonStyle(.borderless)
         }
@@ -101,19 +107,6 @@ struct MenuContentView: View {
             }
             if actions.isEmpty {
                 Text("Nothing here for these files.").font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var settingsButton: some View {
-        if #available(macOS 14, *) {
-            SettingsLink { Text("Settings…") }
-                .simultaneousGesture(TapGesture().onEnded { NSApp.activate(ignoringOtherApps: true) })
-        } else {
-            Button("Settings…") {
-                NSApp.activate(ignoringOtherApps: true)
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
             }
         }
     }
