@@ -311,15 +311,16 @@ final class ConvertorTests: XCTestCase {
         let controller = StatusItemController()
         for _ in 0..<30 where !controller.isInMenuBar { try await Task.sleep(for: .milliseconds(100)) }
         guard controller.isInMenuBar else { throw XCTSkip("the menu bar didn't place the icon in this session") }
-        var events: [String] = []
+        final class Log: @unchecked Sendable { var items: [String] = [] }
+        let events = Log()
         for name in [NSPopover.willShowNotification, NSPopover.didShowNotification, NSPopover.willCloseNotification, NSPopover.didCloseNotification] {
-            NotificationCenter.default.addObserver(forName: name, object: controller.popover, queue: nil) { _ in events.append(name.rawValue) }
+            NotificationCenter.default.addObserver(forName: name, object: controller.popover, queue: nil) { _ in events.items.append(name.rawValue) }
         }
         controller.openPanel()
-        print("DIAG after open: shown \(controller.popover.isShown) events \(events) \(controller.diagnostics)")
+        print("DIAG after open: shown \(controller.popover.isShown) events \(events.items) \(controller.diagnostics)")
         controller.openPanel()
         try await Task.sleep(for: .milliseconds(300))
-        print("DIAG later: shown \(controller.popover.isShown) events \(events)")
+        print("DIAG later: shown \(controller.popover.isShown) events \(events.items)")
         let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
         window.orderFrontRegardless()
         let control = NSPopover()
