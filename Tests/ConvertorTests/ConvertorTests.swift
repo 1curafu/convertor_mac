@@ -216,7 +216,8 @@ final class ConvertorTests: XCTestCase {
         try "ID\n12345678901234567\n".write(to: ids, atomically: true, encoding: .utf8)
         let idsXLSX = Output.file(for: ids, ext: "xlsx")
         try await Spreadsheet.write(try await Spreadsheet.read(ids), to: idsXLSX, ext: "xlsx")
-        XCTAssertEqual(try await Spreadsheet.read(idsXLSX).sheets[0].rows[1], ["12345678901234567"])
+        let idsBack = try await Spreadsheet.read(idsXLSX)
+        XCTAssertEqual(idsBack.sheets[0].rows[1], ["12345678901234567"])
     }
 
     /// Excel stores dates as day counts; the cell's number format is what makes them dates.

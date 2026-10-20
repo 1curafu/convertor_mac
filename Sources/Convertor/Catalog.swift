@@ -200,7 +200,7 @@ enum Catalog {
             var tools: [Action] = [
                 compress, metadata,
                 .tool(.edit, "Edit", "slider.horizontal.3"),
-                .tool(.annotate, "Annotate", "pencil.tip"),
+                .tool(.annotate, "Annotate", "pencil.and.outline"),
                 .tool(.addBackground, "Add BG", "photo.artframe"),
                 .tool(.crop, "Crop", "crop"),
                 .tool(.redact, "Redact", "eye.slash"),

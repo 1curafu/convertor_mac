@@ -38,7 +38,7 @@ enum FFmpeg {
     /// chain, or a new `-vf`.
     static func evenDimensions(_ args: [String]) -> [String] {
         guard args.contains("libx264") else { return args }
-        let even = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+        let even = "scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1"   // square pixels, so players show the new size
         var args = args
         if let graph = args.firstIndex(of: "-filter_complex"), graph + 1 < args.count,
            let map = args.indices.first(where: { $0 > 0 && args[$0 - 1] == "-map" && args[$0].hasPrefix("[") }) {

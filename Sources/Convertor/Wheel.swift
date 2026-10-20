@@ -151,7 +151,11 @@ struct WheelView: View {
         let labelRadius = WheelGeometry.labelRadius
         let side = WheelGeometry.outer * 2
         // Opaque: a translucent fill shows where it overlaps the rounding stroke, like an inner outline.
-        let idle = Color(nsColor: .controlBackgroundColor)
+        // In dark mode the tiles are lifted above the glass so the gaps between them still show.
+        let idle = Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? NSColor(white: 0.19, alpha: 1) : NSColor.controlBackgroundColor
+        })
         let fontSize = SegmentLabel.fontSize(for: model.actions, count: count)
 
         return ZStack {
@@ -172,7 +176,7 @@ struct WheelView: View {
                 let active = model.hovered == index
                 let radians = WheelGeometry.angle(of: index, count: count) * .pi / 180
                 let segment = RingSegment(index: index, count: count)
-                let fill = active ? Color.tangerine : idle
+                let fill = active ? Color.tangerineDeep : idle
 
                 segment
                     .fill(fill)
@@ -182,8 +186,6 @@ struct WheelView: View {
                     .shadow(color: .black.opacity(active ? 0.25 : 0.08), radius: active ? 6 : 2, y: 1)
 
                 SegmentLabel(action: action, active: active, fontSize: fontSize, width: WheelGeometry.labelWidth(count: count))
-                    // Scale before positioning, or the label scales around the wheel's centre and drifts.
-                    .scaleEffect(active ? 1.06 : 1)
                     .position(x: side / 2 + labelRadius * CGFloat(cos(radians)), y: side / 2 + labelRadius * CGFloat(sin(radians)))
             }
 
@@ -210,7 +212,7 @@ struct WheelView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background(Capsule().fill(Color.tangerine))
+                        .background(Capsule().fill(Color.tangerineDeep))
                         .offset(x: 22, y: -22)
                 }
             }
@@ -269,7 +271,7 @@ private struct ModeBar: View {
                 .padding(.horizontal, 9)
                 .padding(.vertical, 5)
                 .foregroundStyle(item == mode ? Color.white : Color.secondary)
-                .background(Capsule().fill(item == mode ? Color.tangerine : Color.clear))
+                .background(Capsule().fill(item == mode ? Color.tangerineDeep : Color.clear))
             }
         }
         .padding(3)

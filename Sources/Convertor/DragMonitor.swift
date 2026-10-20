@@ -103,7 +103,10 @@ final class DragMonitor {
                 guard let self, self.timer == nil || delay == 0 else { return }
                 self.model.visible = false
                 self.model.hovered = nil
-                self.panel.orderOut(nil)
+                // Let the fade-out play before the panel goes, unless the wheel came back meanwhile.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    MainActor.assumeIsolated { if !self.model.visible { self.panel.orderOut(nil) } }
+                }
             }
         }
     }
