@@ -100,6 +100,21 @@ enum Media {
     static func thumbnails(_ url: URL, count: Int, duration: Double) async -> [CGImage] {
         guard duration > 0 else { return [] }
         var images: [CGImage] = []
+        if isAppleReadable(url) {
+            // One generator with some time tolerance: much faster than frame-exact seeks.
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 240, height: 240)
+            let tolerance = CMTime(seconds: duration / Double(count * 2), preferredTimescale: 600)
+            generator.requestedTimeToleranceBefore = tolerance
+            generator.requestedTimeToleranceAfter = tolerance
+            for index in 0..<count {
+                let time = CMTime(seconds: duration * (Double(index) + 0.5) / Double(count), preferredTimescale: 600)
+                if let image = try? await generator.image(at: time).image { images.append(image) }
+            }
+            if images.count == count { return images }
+            images = []
+        }
         for index in 0..<count {
             let time = duration * (Double(index) + 0.5) / Double(count)
             if let image = await frame(url, at: time, maxSize: 240) { images.append(image) }
