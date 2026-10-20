@@ -8,7 +8,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     let popover = NSPopover()
     private var monitors: [Any] = []
-    private var dragCountAtPress = 0
+    private var dragCountAtPress: Int?
+    private var openedAt = Date.distantPast
 
     override init() {
         super.init()
@@ -35,7 +36,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         } else if (event?.clickCount ?? 1) > 1 {
             openPanel()
         } else if popover.isShown {
-            closePanel()
+            // The click that opened the panel can arrive a second time; only a later click closes it.
+            if !justOpened { closePanel() }
         } else {
             openPanel()
         }
@@ -46,6 +48,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
+        openedAt = Date()
+        dragCountAtPress = nil
 
         // A click in another app closes the panel, but only once the button is released without
         // a drag starting: dragging a file from Finder onto the panel starts with that same press.
@@ -60,16 +64,30 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         monitors = [outside, inside].compactMap { $0 }
     }
 
+    /// The menu bar can report the icon's own click as one in another app, and the click that opened
+    /// the panel can trail in after it; neither should close it.
+    private var justOpened: Bool { Date().timeIntervalSince(openedAt) < 0.3 }
+
+    private var mouseIsOnIcon: Bool {
+        item.button?.window?.frame.insetBy(dx: -2, dy: -2).contains(NSEvent.mouseLocation) == true
+    }
+
     private func otherAppClicked(_ type: NSEvent.EventType) {
+        guard !justOpened, !mouseIsOnIcon else { return }
         let count = NSPasteboard(name: .drag).changeCount
-        if type == .leftMouseDown { dragCountAtPress = count }
-        else if type == .rightMouseDown || count == dragCountAtPress { closePanel() }
+        switch type {
+        case .leftMouseDown: dragCountAtPress = count
+        // Close on release, unless the press started a drag (a file on its way to the panel).
+        case .leftMouseUp: if let pressed = dragCountAtPress, pressed == count { closePanel() }
+        default: closePanel()
+        }
     }
 
     /// Closes the panel on Escape (swallowing the key) or a click in another of the app's windows.
     /// Clicks on the icon itself are left to `clicked`.
     private func closeIfOutside(_ event: NSEvent) -> Bool {
         guard NSApp.modalWindow == nil else { return false }  // e.g. the panel's Choose Files… dialog
+        guard !justOpened else { return false }
         if event.type == .keyDown {
             guard event.keyCode == 53 else { return false }
             closePanel()
