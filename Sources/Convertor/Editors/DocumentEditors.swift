@@ -248,7 +248,7 @@ struct OrganizePDFEditor: View {
 
 @MainActor
 enum Editors {
-    private static var windows: [NSWindow] = []
+    static private(set) var windows: [NSWindow] = []
 
     static func open(_ tool: Tool, title: String, urls: [URL]) {
         let context = EditorContext(urls: urls)

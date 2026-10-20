@@ -27,6 +27,7 @@ jobs:
         run: |
           export CONVERTOR_FFMPEG="$PWD/build/Convertor.app/Contents/MacOS/ffmpeg"
           export CONVERTOR_TEST_OUT="$RUNNER_TEMP/convertor-out"
+          export CONVERTOR_SNAPSHOT_OUT="$RUNNER_TEMP/ui-snapshots"
           set -o pipefail
           swift test 2>&1 | tee test.log || { grep -E ": error:|failed \\(|XCTAssert|error:" test.log | sort -u | head -80; exit 1; }
       - name: Validate Office/ODF/EPUB outputs with independent libraries
@@ -34,3 +35,10 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/pip" install --quiet openpyxl python-pptx python-docx
           "$RUNNER_TEMP/venv/bin/python" scripts/validate_outputs.py "$RUNNER_TEMP/convertor-out"
+      - name: Upload UI snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-snapshots
+          path: ${{ runner.temp }}/ui-snapshots
+          if-no-files-found: warn
