@@ -314,7 +314,7 @@ struct CropVideoEditor: View {
                 Text("Audio is kept.").font(.caption).foregroundStyle(.secondary)
             }
         }
-        .task { await session.load(frame: true) }
+        .task { await session.load(thumbnails: 12, frame: true) }
         .onChange(of: aspect) { _, newValue in
             guard let ratio = newValue.ratio(original: pixelSize) else { return }
             let frameRatio = pixelSize.width / pixelSize.height
@@ -370,7 +370,7 @@ struct RedactVideoEditor: View {
             }
         }
         .task {
-            await session.load(frame: true)
+            await session.load(thumbnails: 12, frame: true)
             end = session.info.duration
         }
         .onDisappear { session.stop() }
