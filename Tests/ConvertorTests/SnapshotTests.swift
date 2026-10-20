@@ -144,6 +144,13 @@ final class SnapshotTests: XCTestCase {
             try await capture(settings, as: "settings-\(theme)")
             settings.close()
         }
+
+        // The real panel, opened from the menu bar icon.
+        let controller = StatusItemController()
+        controller.openPanel()
+        try await Task.sleep(for: .milliseconds(600))
+        if let panel = controller.popover.contentViewController?.view.window { try await capture(panel, as: "menu-panel") }
+        controller.closePanel()
     }
 
     // MARK: Editors

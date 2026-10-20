@@ -13,7 +13,8 @@ Convertor converts and edits files without opening any app. It lives in the menu
    git clone -b main https://github.com/1curafu/convertor_mac && cd convertor_mac
    scripts/build_app.sh --install
    ```
-3. Convertor opens and appears in the menu bar. It has no Dock icon.
+3. Convertor opens and appears in the menu bar. It has no Dock icon. Click the icon for the Convertor
+   window; right-click it (or ⌃-click) for **Settings…** and **Quit Convertor**.
 4. Optional: open **Settings → Launch at login** so it's always ready.
 
 ## The basic move
@@ -144,7 +145,7 @@ for a single file.
 
 ## Settings
 
-Open from the menu bar window → **Settings…**
+Open from the menu bar window → **Settings…**, or right-click the menu bar icon → **Settings…**
 
 - **Open the wheel while dragging files:** turn the gesture off without quitting the app.
 - **Save results:** next to the original, in Downloads, or in a folder you choose.

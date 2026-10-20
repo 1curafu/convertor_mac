@@ -23,6 +23,7 @@ scripts/build_app.sh [--install]              # build/Convertor.app with a stati
 | Path | What lives there |
 |---|---|
 | `Catalog.swift` | `FileKind` detection, `Mode`, `Tool`, `Action`, and which segments each wheel shows (order matches Tangerine) |
+| `StatusItem.swift` | Menu bar icon: click opens the panel (`MenuContentView`), right-click menu with Settings and Quit |
 | `DragMonitor.swift`, `Wheel.swift` | Global drag detection, the wheel panel, its geometry and drop hit-testing |
 | `ConversionCenter.swift` | Runs actions as background jobs (menu bar history) or opens editors |
 | `Engine/Engine.swift` | Dispatches convert actions and one-tap tools to the engines |
