@@ -105,18 +105,29 @@ struct ControlGroup<Content: View>: View {
     }
 }
 
-/// One choice in a grid of options. The selected one is filled, so it reads at a glance even when
-/// the window isn't active.
+/// One choice in a grid of options. The selected one is filled in a deeper tangerine with white
+/// text (AA contrast), drawn by hand so it shows even when the window isn't active.
 struct OptionButton<Label: View>: View {
     let selected: Bool
     let action: () -> Void
     @ViewBuilder let label: () -> Label
 
     var body: some View {
-        if selected {
-            Button(action: action, label: label).buttonStyle(.borderedProminent).tint(.tangerineDeep)
-        } else {
-            Button(action: action, label: label).buttonStyle(.bordered)
+        Button(action: action, label: label).buttonStyle(OptionStyle(selected: selected))
+    }
+
+    private struct OptionStyle: ButtonStyle {
+        let selected: Bool
+
+        func makeBody(configuration: Configuration) -> some View {
+            let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+            configuration.label
+                .font(.callout.weight(selected ? .semibold : .regular))
+                .padding(.vertical, 4)
+                .padding(.horizontal, 6)
+                .foregroundStyle(selected ? Color.white : Color.primary)
+                .background(shape.fill(selected ? Color.tangerineDeep : Color.primary.opacity(configuration.isPressed ? 0.16 : 0.08)))
+                .contentShape(shape)
         }
     }
 }

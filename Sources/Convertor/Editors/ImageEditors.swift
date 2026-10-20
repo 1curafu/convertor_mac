@@ -42,9 +42,8 @@ struct CropImageEditor: View {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
                     ForEach(CropAspect.allCases) { option in
                         OptionButton(selected: aspect == option, action: { aspect = option }) {
-                            Text(option.rawValue).frame(maxWidth: .infinity)
+                            Text(option.rawValue).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity)
                         }
-                        .controlSize(.small)
                     }
                 }
             }
@@ -363,16 +362,20 @@ struct PhotoEditor: View {
             }
         } controls: {
             // Orientation, compare and reset first: below the sliders they ran off the window.
-            HStack(spacing: 6) {
-                Button { adjustments.quarterTurns -= 1 } label: { Image(systemName: "rotate.left") }.help("Rotate left")
-                Button { adjustments.quarterTurns += 1 } label: { Image(systemName: "rotate.right") }.help("Rotate right")
-                Button { adjustments.flipped.toggle() } label: {
-                    Image(systemName: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+            ControlGroup("Orientation") {
+                HStack(spacing: 6) {
+                    Button { adjustments.quarterTurns -= 1 } label: { Image(systemName: "rotate.left") }.help("Rotate left")
+                    Button { adjustments.quarterTurns += 1 } label: { Image(systemName: "rotate.right") }.help("Rotate right")
+                    Button { adjustments.flipped.toggle() } label: {
+                        Image(systemName: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+                    }
+                    .help("Flip horizontally")
                 }
-                .help("Flip horizontally")
+            }
+            HStack {
+                Toggle("Show Original", isOn: $showOriginal).toggleStyle(.button)
                 Spacer()
-                Toggle("Original", isOn: $showOriginal).toggleStyle(.button).help("Compare with the original")
-                Button("Reset") { adjustments = ImageEdits.Adjustments() }
+                Button("Reset All") { adjustments = ImageEdits.Adjustments() }
                     .disabled(adjustments == ImageEdits.Adjustments())
             }
             ControlGroup("Effect") {

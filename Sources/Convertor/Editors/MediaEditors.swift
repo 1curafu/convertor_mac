@@ -306,9 +306,8 @@ struct CropVideoEditor: View {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
                     ForEach(CropAspect.allCases) { option in
                         OptionButton(selected: aspect == option, action: { aspect = option }) {
-                            Text(option.rawValue).frame(maxWidth: .infinity)
+                            Text(option.rawValue).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity)
                         }
-                        .controlSize(.small)
                     }
                 }
             }

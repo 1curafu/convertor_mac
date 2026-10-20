@@ -173,7 +173,7 @@ final class SnapshotTests: XCTestCase {
                 let window = try XCTUnwrap(Editors.windows.last, "\(name) didn't open a window")
                 XCTAssertEqual(Editors.windows.count, before + 1, name)
                 window.appearance = NSAppearance(named: appearance)
-                try await Task.sleep(for: .seconds(2.5))   // let the editor load its file
+                try await Task.sleep(for: .seconds(4))   // let the editor load its file and thumbnails
                 try await capture(window, as: "editor-\(name)-\(theme)")
                 window.close()
             }
