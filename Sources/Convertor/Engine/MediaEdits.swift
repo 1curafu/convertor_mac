@@ -168,8 +168,9 @@ enum MediaEdits {
             for (index, box) in boxes.enumerated() {
                 let effect: String
                 if style == .blur {
-                    let radius = max(2, min(30, min(box.w, box.h) / 4))
-                    effect = "boxblur=\(radius):3:\(max(1, radius / 2)):3"
+                    // boxblur caps the radius at half the plane's shorter side (chroma planes are half size).
+                    let radius = max(1, min(30, min(box.w, box.h) / 4))
+                    effect = "boxblur=\(radius):3:\(min(max(1, radius / 2), min(box.w, box.h) / 4)):3"
                 } else {
                     effect = "scale=max(2\\,iw/16):max(2\\,ih/16),scale=\(box.w):\(box.h):flags=neighbor"
                 }
@@ -216,7 +217,8 @@ enum MediaEdits {
         var infos: [Media.Info] = []
         for url in urls { infos.append(await Media.probe(url)) }
         let width = max(2, infos[0].width / 2 * 2), height = max(2, infos[0].height / 2 * 2)
-        let withAudio = infos.allSatisfy(\.hasAudio)
+        // Clips without sound get silence, so one silent clip doesn't drop everyone's audio.
+        let withAudio = infos.contains(where: \.hasAudio)
 
         var graph = ""
         var inputs = ""
@@ -225,7 +227,10 @@ enum MediaEdits {
                 + "pad=\(width):\(height):(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p[v\(index)];"
             inputs += "[v\(index)]"
             if withAudio {
-                graph += "[\(index):a]aresample=48000,aformat=channel_layouts=stereo[a\(index)];"
+                let source = infos[index].hasAudio
+                    ? "[\(index):a]aresample=48000"
+                    : "anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration=\(seconds(infos[index].duration))"
+                graph += "\(source),aformat=channel_layouts=stereo[a\(index)];"
                 inputs += "[a\(index)]"
             }
         }

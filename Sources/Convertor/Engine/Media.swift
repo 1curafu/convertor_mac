@@ -10,6 +10,7 @@ enum Media {
         var hasAudio = false
         var width = 0
         var height = 0
+        var sampleRate = 0
     }
 
     static func isAppleReadable(_ url: URL) -> Bool { MediaEngine.appleReadable(url) }
@@ -27,7 +28,13 @@ enum Media {
                 info.width = Int(abs(rotated.width))
                 info.height = Int(abs(rotated.height))
             }
-            info.hasAudio = !((try? await asset.loadTracks(withMediaType: .audio)) ?? []).isEmpty
+            if let audio = try? await asset.loadTracks(withMediaType: .audio).first {
+                info.hasAudio = true
+                if let format = try? await audio.load(.formatDescriptions).first,
+                   let description = CMAudioFormatDescriptionGetStreamBasicDescription(format) {
+                    info.sampleRate = Int(description.pointee.mSampleRate)
+                }
+            }
             if info.duration > 0 { return info }
         }
 
@@ -47,7 +54,10 @@ enum Media {
                     info.height = Int(size.2) ?? 0
                 }
             }
-            if line.contains("Audio:") { info.hasAudio = true }
+            if line.contains("Audio:") {
+                info.hasAudio = true
+                if let rate = line.firstMatch(of: #/(\d{4,6}) Hz/#) { info.sampleRate = Int(rate.1) ?? 0 }
+            }
         }
         return info
     }

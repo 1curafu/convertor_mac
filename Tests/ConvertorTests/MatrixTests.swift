@@ -273,6 +273,9 @@ final class MatrixTests: XCTestCase {
                     report.append("| \(label) | ✓ |")
                 }
             }
+        } catch let error where error.localizedDescription.hasPrefix("Already as small") {
+            // Compress keeps nothing when the result would be bigger; that's the right outcome.
+            report.append("| \(label) | – \(error.localizedDescription) |")
         } catch let error where isMissingApp(error) {
             report.append("| \(label) | – needs Pages/Keynote/Numbers (not on this machine): \(error.localizedDescription) |")
         } catch {

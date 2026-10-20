@@ -44,6 +44,10 @@ enum Output {
         return url
     }
 
+    static func fileSize(_ url: URL) -> Int? {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+    }
+
     static func unique(_ dir: URL, name: String, ext: String?) -> URL {
         func make(_ n: String) -> URL {
             dir.appendingPathComponent(ext.map { "\(n).\($0)" } ?? n)

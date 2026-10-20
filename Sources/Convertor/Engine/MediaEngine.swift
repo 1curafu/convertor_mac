@@ -50,20 +50,26 @@ enum MediaEngine {
             let outExt = ext == "mp3" ? "mp3" : "m4a"
             let out = Output.file(for: url, suffix: " compressed", ext: outExt)
             let codec = outExt == "mp3" ? ["-c:a", "libmp3lame"] : ["-c:a", "aac"]
-            try await FFmpeg.run(input: url, output: out, args: ["-vn"] + codec + ["-b:a", "128k"])
+            try await FFmpeg.run(input: url, output: out, args: ["-vn"] + codec + ["-b:a", "\(audioBitrate)k"])
             return out
         }
         let out = Output.file(for: url, suffix: " compressed", ext: "mp4")
         if FFmpeg.isAvailable {
             try await FFmpeg.run(input: url, output: out, args: [
-                "-c:v", "libx264", "-crf", "28", "-preset", "slow", "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
+                "-c:v", "libx264", "-crf", "\(videoCRF)", "-preset", "slow", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "\(audioBitrate)k", "-movflags", "+faststart",
             ])
         } else {
             try await export(AVURLAsset(url: url), preset: AVAssetExportPresetHEVCHighestQuality, to: out, type: .mp4)
         }
         return out
     }
+
+    /// Settings → Compression quality (0.2…0.9) as an x264 CRF: 33 at the low end, 22 at the top.
+    static var videoCRF: Int { Int((36 - 16 * ImageEngine.compressQuality).rounded()) }
+
+    /// The same setting as an audio bitrate in kbps, 80…192 in steps of 16.
+    static var audioBitrate: Int { Int(((48 + 160 * ImageEngine.compressQuality) / 16).rounded()) * 16 }
 
     static func mute(_ url: URL) async throws -> URL {
         let ext = Catalog.normalize(url)
@@ -81,7 +87,11 @@ enum MediaEngine {
     static func normalize(_ url: URL) async throws -> URL {
         let ext = Catalog.normalize(url)
         let out = Output.file(for: url, suffix: " normalized", ext: ext)
-        try await FFmpeg.run(input: url, output: out, args: ["-vn", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11"] + audioCodec(for: ext))
+        // loudnorm resamples to 192 kHz; go back to the source rate (Opus only takes 48 kHz).
+        let source = await Media.probe(url).sampleRate
+        let rate = ext == "opus" || source == 0 ? 48000 : source
+        try await FFmpeg.run(input: url, output: out,
+                             args: ["-vn", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11", "-ar", "\(rate)"] + audioCodec(for: ext))
         return out
     }
 

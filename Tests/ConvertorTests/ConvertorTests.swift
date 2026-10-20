@@ -440,6 +440,28 @@ final class ConvertorTests: XCTestCase {
         exists(try await MediaEngine.normalize(audio))
     }
 
+    /// x264 needs even sizes; screen recordings often have odd ones.
+    func testOddSizedVideoEncodesToH264() async throws {
+        let ffmpeg = try requireFFmpeg()
+        let odd = file("odd.mkv")
+        try await Shell.run(ffmpeg, ["-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=321x241:rate=30:duration=2",
+                                     "-c:v", "ffv1", odd.path])
+        for output in [try await MediaEngine.compress(odd), try await MediaEngine.convert(odd, to: "mp4"),
+                       try await MediaEdits.speed(odd, factor: 2, hasAudio: false)] {
+            let info = await Media.probe(output)
+            XCTAssertEqual([info.width, info.height], [320, 240], output.lastPathComponent)
+        }
+        XCTAssertEqual(FFmpeg.evenDimensions(["-c:a", "aac"]), ["-c:a", "aac"])
+    }
+
+    func testNormalizeKeepsTheSampleRate() async throws {
+        let audio = try await makeAudio("loud.wav")
+        let source = await Media.probe(audio).sampleRate
+        XCTAssertGreaterThan(source, 0)
+        let normalized = await Media.probe(try await MediaEngine.normalize(audio)).sampleRate
+        XCTAssertEqual(normalized, source)
+    }
+
     func testMediaEdits() async throws {
         let video = try await makeVideo("edit.mp4", seconds: 4)
         let audio = try await makeAudio("speech.wav")
