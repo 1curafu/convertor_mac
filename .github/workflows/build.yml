@@ -7,6 +7,8 @@ on:
 jobs:
   build:
     runs-on: macos-26
+    permissions:
+      contents: write   # only to publish UI snapshots to the ui-snapshots branch
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
@@ -42,3 +44,14 @@ jobs:
           name: ui-snapshots
           path: ${{ runner.temp }}/ui-snapshots
           if-no-files-found: warn
+      - name: Publish UI snapshots to the ui-snapshots branch
+        if: always() && github.event_name == 'push'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd "$RUNNER_TEMP/ui-snapshots" 2>/dev/null || exit 0
+          git init -q -b ui-snapshots
+          git add -A
+          git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" \
+            commit -qm "UI snapshots for ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}"
+          git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ui-snapshots
