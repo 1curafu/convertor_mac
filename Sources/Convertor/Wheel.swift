@@ -241,11 +241,11 @@ struct SegmentLabel: View {
 
     /// One size for every label on a wheel: the largest at which the longest title fits its tile.
     static func fontSize(for actions: [Action], count: Int) -> CGFloat {
-        let base: CGFloat = actions.contains { !$0.symbol.isEmpty } ? 10 : 13
-        let widest = actions.map { width(of: $0.title.uppercased(), size: base) }.max() ?? 0
+        let titles = actions.map { $0.title.uppercased() }
         let room = WheelGeometry.labelWidth(count: count)
-        guard widest > room else { return base }
-        return max(7, (base * room / widest * 2).rounded(.down) / 2)
+        var size: CGFloat = actions.contains { !$0.symbol.isEmpty } ? 10 : 13
+        while size > 7, titles.contains(where: { width(of: $0, size: size) > room }) { size -= 0.5 }
+        return size
     }
 
     static func width(of title: String, size: CGFloat) -> CGFloat {
