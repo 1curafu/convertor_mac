@@ -77,14 +77,9 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         monitors = []
     }
 
-    /// False until the menu bar has placed the icon.
-    var isInMenuBar: Bool { item.button?.window != nil }
-    var diagnostics: String {
-        let window = item.button?.window
-        return "button \(item.button?.frame ?? .zero) window \(window?.frame ?? .zero) visible \(window?.isVisible ?? false) "
-            + "screen \(window?.screen?.frame ?? .zero) item visible \(item.isVisible) length \(item.length) "
-            + "content \(popover.contentViewController?.view.fittingSize ?? .zero)"
-    }
+    /// False until the menu bar has placed the icon. Headless sessions (CI) never do: the icon's
+    /// window stays zero-height and a panel can't be anchored to it.
+    var isInMenuBar: Bool { (item.button?.window?.frame.height ?? 0) > 0 }
 
     private func showMenu() {
         guard let button = item.button else { return }
