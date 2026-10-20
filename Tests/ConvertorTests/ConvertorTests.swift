@@ -311,9 +311,22 @@ final class ConvertorTests: XCTestCase {
         let controller = StatusItemController()
         for _ in 0..<30 where !controller.isInMenuBar { try await Task.sleep(for: .milliseconds(100)) }
         guard controller.isInMenuBar else { throw XCTSkip("the menu bar didn't place the icon in this session") }
+        var events: [String] = []
+        for name in [NSPopover.willShowNotification, NSPopover.didShowNotification, NSPopover.willCloseNotification, NSPopover.didCloseNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: controller.popover, queue: nil) { _ in events.append(name.rawValue) }
+        }
         controller.openPanel()
+        print("DIAG after open: shown \(controller.popover.isShown) events \(events) \(controller.diagnostics)")
         controller.openPanel()
         try await Task.sleep(for: .milliseconds(300))
+        print("DIAG later: shown \(controller.popover.isShown) events \(events)")
+        let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+        window.orderFrontRegardless()
+        let control = NSPopover()
+        control.contentViewController = NSViewController()
+        control.contentViewController?.view = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        control.show(relativeTo: .zero, of: window.contentView!, preferredEdge: .minY)
+        print("DIAG control popover shown: \(control.isShown)")
         XCTAssertTrue(controller.popover.isShown, "the panel should stay open while the app isn't active (CI can't activate it)")
         controller.closePanel()
         try await Task.sleep(for: .milliseconds(300))

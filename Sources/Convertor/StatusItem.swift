@@ -79,6 +79,12 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     /// False until the menu bar has placed the icon.
     var isInMenuBar: Bool { item.button?.window != nil }
+    var diagnostics: String {
+        let window = item.button?.window
+        return "button \(item.button?.frame ?? .zero) window \(window?.frame ?? .zero) visible \(window?.isVisible ?? false) "
+            + "screen \(window?.screen?.frame ?? .zero) item visible \(item.isVisible) length \(item.length) "
+            + "content \(popover.contentViewController?.view.fittingSize ?? .zero)"
+    }
 
     private func showMenu() {
         guard let button = item.button else { return }
