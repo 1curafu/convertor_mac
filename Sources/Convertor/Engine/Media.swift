@@ -11,6 +11,7 @@ enum Media {
         var width = 0
         var height = 0
         var sampleRate = 0
+        var frameRate = 30.0
     }
 
     static func isAppleReadable(_ url: URL) -> Bool { MediaEngine.appleReadable(url) }
@@ -24,6 +25,7 @@ enum Media {
                 info.hasVideo = true
                 let size = (try? await video.load(.naturalSize)) ?? .zero
                 let transform = (try? await video.load(.preferredTransform)) ?? .identity
+                if let rate = try? await video.load(.nominalFrameRate), rate > 0 { info.frameRate = Double(rate) }
                 let rotated = size.applying(transform)
                 info.width = Int(abs(rotated.width))
                 info.height = Int(abs(rotated.height))
@@ -49,6 +51,9 @@ enum Media {
         for line in text.split(separator: "\n") where line.contains("Stream #") {
             if line.contains("Video:") {
                 info.hasVideo = true
+                if let rate = line.firstMatch(of: #/(\d+(?:\.\d+)?) fps/#), let value = Double(rate.1), value > 0 {
+                    info.frameRate = value
+                }
                 if let size = line.firstMatch(of: #/, (\d{2,5})x(\d{2,5})/#) {
                     info.width = Int(size.1) ?? 0
                     info.height = Int(size.2) ?? 0

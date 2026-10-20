@@ -179,12 +179,13 @@ struct SplitEditor: View {
             }
         } controls: {
             ControlGroup("Split points") {
-                Button("Split at \(timecode(session.playhead))") {
-                    let point = session.playhead
-                    guard point > 0.1, point < session.info.duration - 0.1, !points.contains(where: { abs($0 - point) < 0.1 }) else { return }
+                let point = session.playhead
+                let canSplit = point > 0.1 && point < session.info.duration - 0.1 && !points.contains { abs($0 - point) < 0.1 }
+                Button("Split at \(timecode(point))") {
                     points.append(point)
                     points.sort()
                 }
+                .disabled(!canSplit)
                 ForEach(points, id: \.self) { point in
                     HStack {
                         Text(timecode(point)).font(.callout.monospacedDigit())
@@ -192,7 +193,9 @@ struct SplitEditor: View {
                         Button { points.removeAll { $0 == point } } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
                     }
                 }
-                Text("\(points.count + 1) clips will be saved in a new folder.").font(.caption).foregroundStyle(.secondary)
+                Text(points.isEmpty ? "Move the playhead to where a new clip should start."
+                                    : "\(points.count + 1) clips will be saved in a new folder.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .task { await session.load(thumbnails: 12, frame: session.player == nil) }
@@ -219,7 +222,7 @@ struct SnapshotEditor: View {
     }
 
     var body: some View {
-        EditorScaffold(title: "Save Video Frames", context: context, saveTitle: "Done", onSave: { context.close() }) {
+        EditorScaffold(title: "Save Video Frames", context: context, saveTitle: "Done", showsCancel: false, onSave: { context.close() }) {
             MediaStage(session: session) { _, _ in EmptyView() }
         } controls: {
             ControlGroup("Snapshot") {
@@ -227,10 +230,10 @@ struct SnapshotEditor: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Save frame at \(timecode(session.playhead))", action: snap)
                     .buttonStyle(.borderedProminent)
-                    .tint(.tangerine)
+                    .tint(.tangerineDeep)
                     .keyboardShortcut("s", modifiers: [])
                 if saved > 0 {
-                    Text("\(saved) saved").foregroundStyle(.secondary)
+                    Text(saved == 1 ? "1 frame saved" : "\(saved) frames saved").foregroundStyle(.secondary)
                     if let folder { Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([folder]) } }
                 }
             }
@@ -244,8 +247,8 @@ struct SnapshotEditor: View {
         do {
             let target = try folder ?? Output.folder(for: url, suffix: " frames")
             folder = target
-            saved += 1
-            ConversionCenter.shared.run("\(url.lastPathComponent) → Frame \(timecode(time))") {
+            ConversionCenter.shared.run("\(url.lastPathComponent) → Frame \(timecode(time))", reveal: false,
+                                        completion: { if $0 { saved += 1 } }) {
                 [try await MediaEdits.snapshot(url, at: time, into: target)]
             }
         } catch {
@@ -300,11 +303,12 @@ struct CropVideoEditor: View {
             }
         } controls: {
             ControlGroup("Aspect ratio") {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
                     ForEach(CropAspect.allCases) { option in
-                        Button(option.rawValue) { aspect = option }
-                            .buttonStyle(.bordered)
-                            .tint(aspect == option ? .tangerine : nil)
+                        OptionButton(selected: aspect == option, action: { aspect = option }) {
+                            Text(option.rawValue).frame(maxWidth: .infinity)
+                        }
+                        .controlSize(.small)
                     }
                 }
             }
@@ -407,9 +411,9 @@ struct SpeedEditor: View {
             ControlGroup("Speed") {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
                     ForEach(options, id: \.self) { option in
-                        Button(label(option)) { factor = option }
-                            .buttonStyle(.bordered)
-                            .tint(factor == option ? .tangerine : nil)
+                        OptionButton(selected: factor == option, action: { factor = option }) {
+                            Text(label(option)).frame(maxWidth: .infinity)
+                        }
                     }
                 }
                 Text("Audio keeps its pitch. Press play to preview at this speed.").font(.caption).foregroundStyle(.secondary)

@@ -39,11 +39,12 @@ struct CropImageEditor: View {
             }
         } controls: {
             ControlGroup("Aspect ratio") {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
                     ForEach(CropAspect.allCases) { option in
-                        Button(option.rawValue) { aspect = option }
-                            .buttonStyle(.bordered)
-                            .tint(aspect == option ? .tangerine : nil)
+                        OptionButton(selected: aspect == option, action: { aspect = option }) {
+                            Text(option.rawValue).frame(maxWidth: .infinity)
+                        }
+                        .controlSize(.small)
                     }
                 }
             }
@@ -58,7 +59,8 @@ struct CropImageEditor: View {
                     TextField("Height", text: $outputHeight).frame(width: 80)
                 }
                 .textFieldStyle(.roundedBorder)
-                Text("Leave empty to keep the cropped pixels as they are.").font(.caption).foregroundStyle(.secondary)
+                Text("Fill in one side to scale in proportion, or leave both empty to keep the cropped pixels.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Button("Reset") {
                 aspect = .free
@@ -80,9 +82,17 @@ struct CropImageEditor: View {
 
     private func save() {
         let urls = context.urls, rect = rect
+        // One typed side is enough: the other follows the crop's shape.
+        let crop = CGSize(width: rect.width * source.size.width, height: rect.height * source.size.height)
+        let typedWidth = Double(outputWidth).flatMap { $0 >= 1 ? $0 : nil }
+        let typedHeight = Double(outputHeight).flatMap { $0 >= 1 ? $0 : nil }
         let size: CGSize? = {
-            guard let w = Double(outputWidth), let h = Double(outputHeight), w >= 1, h >= 1 else { return nil }
-            return CGSize(width: w, height: h)
+            switch (typedWidth, typedHeight) {
+            case let (w?, h?): return CGSize(width: w, height: h)
+            case let (w?, nil): return CGSize(width: w, height: (w * crop.height / max(crop.width, 1)).rounded())
+            case let (nil, h?): return CGSize(width: (h * crop.width / max(crop.height, 1)).rounded(), height: h)
+            default: return nil
+            }
         }()
         context.save("Crop") {
             var outputs: [URL] = []
@@ -131,13 +141,9 @@ struct AnnotateEditor: View {
             ControlGroup("Tool") {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
                     ForEach(ImageEdits.Annotation.Kind.allCases) { kind in
-                        Button {
-                            tool = kind
-                        } label: {
+                        OptionButton(selected: tool == kind, action: { tool = kind }) {
                             Image(systemName: kind.symbol).frame(maxWidth: .infinity, minHeight: 22)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(tool == kind ? .tangerine : nil)
                         .help(kind.rawValue.capitalized)
                     }
                 }
@@ -188,7 +194,11 @@ struct AnnotateEditor: View {
             let number = annotations.filter { $0.kind == .callout }.count + 1
             annotations.append(ImageEdits.Annotation(kind: .callout, points: [point], color: color, width: thickness, number: number))
         default:
-            if let current { annotations.append(current) }
+            // A plain click would leave a zero-size shape, such as a lone arrowhead.
+            if let current, let first = current.points.first, let last = current.points.last,
+               hypot((last.x - first.x) * frame.width, (last.y - first.y) * frame.height) >= 3 || current.points.count > 2 {
+                annotations.append(current)
+            }
         }
         current = nil
     }
@@ -352,20 +362,18 @@ struct PhotoEditor: View {
                 LoadingStage()
             }
         } controls: {
-            ControlGroup("Light") {
-                ValueSlider(title: "Exposure", value: $adjustments.exposure, range: -2...2)
-                ValueSlider(title: "Contrast", value: $adjustments.contrast, range: 0.5...1.5)
-                ValueSlider(title: "Highlights", value: $adjustments.highlights, range: 0...1)
-                ValueSlider(title: "Shadows", value: $adjustments.shadows, range: -1...1)
-            }
-            ControlGroup("Colour") {
-                ValueSlider(title: "Saturation", value: $adjustments.saturation, range: 0...2)
-                ValueSlider(title: "Vibrance", value: $adjustments.vibrance, range: -1...1)
-                ValueSlider(title: "Warmth", value: $adjustments.warmth, range: -1...1)
-            }
-            ControlGroup("Detail") {
-                ValueSlider(title: "Sharpness", value: $adjustments.sharpness, range: 0...1)
-                ValueSlider(title: "Vignette", value: $adjustments.vignette, range: 0...2)
+            // Orientation, compare and reset first: below the sliders they ran off the window.
+            HStack(spacing: 6) {
+                Button { adjustments.quarterTurns -= 1 } label: { Image(systemName: "rotate.left") }.help("Rotate left")
+                Button { adjustments.quarterTurns += 1 } label: { Image(systemName: "rotate.right") }.help("Rotate right")
+                Button { adjustments.flipped.toggle() } label: {
+                    Image(systemName: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+                }
+                .help("Flip horizontally")
+                Spacer()
+                Toggle("Original", isOn: $showOriginal).toggleStyle(.button).help("Compare with the original")
+                Button("Reset") { adjustments = ImageEdits.Adjustments() }
+                    .disabled(adjustments == ImageEdits.Adjustments())
             }
             ControlGroup("Effect") {
                 Picker("", selection: $adjustments.effect) {
@@ -373,17 +381,20 @@ struct PhotoEditor: View {
                 }
                 .labelsHidden()
             }
-            ControlGroup("Orientation") {
-                HStack {
-                    Button { adjustments.quarterTurns -= 1 } label: { Image(systemName: "rotate.left") }
-                    Button { adjustments.quarterTurns += 1 } label: { Image(systemName: "rotate.right") }
-                    Button { adjustments.flipped.toggle() } label: { Image(systemName: "arrow.left.and.right.righttriangle.left.righttriangle.right") }
-                }
+            ControlGroup("Light") {
+                ValueSlider(title: "Exposure", value: $adjustments.exposure, range: -2...2) { String(format: "%+.1f EV", $0) }
+                ValueSlider(title: "Contrast", value: $adjustments.contrast, range: 0.5...1.5, format: percentFrom(1))
+                ValueSlider(title: "Highlights", value: $adjustments.highlights, range: 0...1, format: percentFrom(1))
+                ValueSlider(title: "Shadows", value: $adjustments.shadows, range: -1...1, format: percentFrom(0))
             }
-            HStack {
-                Button("Reset") { adjustments = ImageEdits.Adjustments() }
-                Spacer()
-                Toggle("Original", isOn: $showOriginal).toggleStyle(.button)
+            ControlGroup("Colour") {
+                ValueSlider(title: "Saturation", value: $adjustments.saturation, range: 0...2, format: percentFrom(1))
+                ValueSlider(title: "Vibrance", value: $adjustments.vibrance, range: -1...1, format: percentFrom(0))
+                ValueSlider(title: "Warmth", value: $adjustments.warmth, range: -1...1, format: percentFrom(0))
+            }
+            ControlGroup("Detail") {
+                ValueSlider(title: "Sharpness", value: $adjustments.sharpness, range: 0...1, format: percentFrom(0))
+                ValueSlider(title: "Vignette", value: $adjustments.vignette, range: 0...2, format: percentFrom(0))
             }
         }
         .task { await source.load(context.url) }
@@ -391,6 +402,14 @@ struct PhotoEditor: View {
             guard let image = source.preview else { return }
             let adjustments = adjustments
             preview = await Task.detached { try? ImageEdits.render(ImageEdits.adjust(CIImage(cgImage: image), adjustments)) }.value
+        }
+    }
+
+    /// Shows a slider as a signed change from its neutral value: "+25 %", "0 %".
+    private func percentFrom(_ neutral: Double) -> (Double) -> String {
+        { value in
+            let change = Int(((value - neutral) * 100).rounded())
+            return change == 0 ? "0 %" : String(format: "%+d %%", change)
         }
     }
 

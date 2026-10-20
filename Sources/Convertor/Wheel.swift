@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 
 extension Color {
     static let tangerine = Color(red: 1.0, green: 0.31, blue: 0.0)
+    /// For fills that carry white text: 4.6:1 contrast (WCAG AA), where `tangerine` only reaches 3.3:1.
+    static let tangerineDeep = Color(red: 0.84, green: 0.247, blue: 0.0)
 }
 
 /// State for the wheel that pops up under the cursor mid-drag.

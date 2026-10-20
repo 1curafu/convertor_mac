@@ -33,8 +33,10 @@ final class ConversionCenter: ObservableObject {
         }
     }
 
-    /// Runs work in the background as a job in the menu bar history.
-    func run(_ title: String, _ work: @escaping () async throws -> [URL]) {
+    /// Runs work in the background as a job in the menu bar history. `reveal: false` skips
+    /// "Reveal results in Finder" for jobs fired in quick succession (saving video frames).
+    func run(_ title: String, reveal: Bool = true, completion: @escaping (Bool) -> Void = { _ in },
+             _ work: @escaping () async throws -> [URL]) {
         let job = Job(title: title, state: .running)
         jobs.insert(job, at: 0)
         if jobs.count > 30 { jobs.removeLast(jobs.count - 30) }
@@ -43,12 +45,14 @@ final class ConversionCenter: ObservableObject {
             do {
                 let outputs = try await work()
                 update(job.id, .done(outputs))
-                if Prefs.defaults.bool(forKey: Prefs.revealAfter) {
+                completion(true)
+                if reveal, Prefs.defaults.bool(forKey: Prefs.revealAfter) {
                     NSWorkspace.shared.activateFileViewerSelecting(outputs)
                 }
                 if Prefs.defaults.bool(forKey: Prefs.playSound) { NSSound(named: "Pop")?.play() }
             } catch {
                 update(job.id, .failed(error.localizedDescription))
+                completion(false)
                 NSSound.beep()
             }
         }

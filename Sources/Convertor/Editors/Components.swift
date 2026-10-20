@@ -30,6 +30,7 @@ struct EditorScaffold<Main: View, Controls: View>: View {
     let context: EditorContext
     var saveTitle = "Save"
     var canSave = true
+    var showsCancel = true
     let onSave: () -> Void
     @ViewBuilder let main: () -> Main
     @ViewBuilder let controls: () -> Controls
@@ -45,9 +46,10 @@ struct EditorScaffold<Main: View, Controls: View>: View {
                     .truncationMode(.middle)
                 Spacer()
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 34)
-            .padding(.bottom, 12)
+            // In the title bar, beside the traffic lights, instead of a row of its own below them.
+            .padding(.leading, 84)
+            .padding(.trailing, 18)
+            .frame(height: 32)
 
             Divider()
             HStack(spacing: 0) {
@@ -64,15 +66,17 @@ struct EditorScaffold<Main: View, Controls: View>: View {
             }
             Divider()
             HStack {
-                Text("Saved next to the original. The original is never changed.")
+                Text("\(Output.destinationSummary). The original is never changed.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Cancel") { context.close() }
-                    .keyboardShortcut(.cancelAction)
+                if showsCancel {
+                    Button("Cancel") { context.close() }
+                        .keyboardShortcut(.cancelAction)
+                }
                 Button(saveTitle, action: onSave)
                     .buttonStyle(.borderedProminent)
-                    .tint(.tangerine)
+                    .tint(.tangerineDeep)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!canSave)
             }
@@ -97,6 +101,22 @@ struct ControlGroup<Content: View>: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
             content()
+        }
+    }
+}
+
+/// One choice in a grid of options. The selected one is filled, so it reads at a glance even when
+/// the window isn't active.
+struct OptionButton<Label: View>: View {
+    let selected: Bool
+    let action: () -> Void
+    @ViewBuilder let label: () -> Label
+
+    var body: some View {
+        if selected {
+            Button(action: action, label: label).buttonStyle(.borderedProminent).tint(.tangerineDeep)
+        } else {
+            Button(action: action, label: label).buttonStyle(.bordered)
         }
     }
 }
@@ -309,7 +329,17 @@ struct CropOverlay: View {
         if moves.top { top = min(max(0, top + dy), bottom - minimum) }
         if moves.bottom { bottom = max(min(1, bottom + dy), top + minimum) }
 
-        if let ratio {
+        if let ratio, !moves.left && !moves.right {
+            // Top or bottom edge: the height leads and the width follows, centred where it was.
+            let pixelRatio = ratio * pixelSize.height / pixelSize.width
+            var height = bottom - top
+            let width = min(1, height * pixelRatio)
+            height = width / pixelRatio
+            if moves.top { top = bottom - height } else { bottom = top + height }
+            let middle = min(max(start.midX, width / 2), 1 - width / 2)
+            left = middle - width / 2
+            right = middle + width / 2
+        } else if let ratio {
             // Normalised height that gives the requested pixel aspect for this width.
             let width = right - left
             var height = width * pixelSize.width / (ratio * pixelSize.height)
@@ -593,8 +623,10 @@ struct TransportBar: View {
     var body: some View {
         HStack(spacing: 12) {
             Button {
-                session.seek(session.playhead - 1.0 / 30)
+                session.seek(session.playhead - 1 / session.info.frameRate)
             } label: { Image(systemName: "backward.frame.fill") }
+                .keyboardShortcut(.leftArrow, modifiers: [])
+                .help("Previous frame (←)")
             Button {
                 if session.isPlaying {
                     session.pause()
@@ -606,9 +638,13 @@ struct TransportBar: View {
                 }
             } label: { Image(systemName: session.isPlaying ? "pause.fill" : "play.fill").frame(width: 18) }
                 .disabled(!session.canPreview)
+                .keyboardShortcut(.space, modifiers: [])
+                .help("Play or pause (Space)")
             Button {
-                session.seek(session.playhead + 1.0 / 30)
+                session.seek(session.playhead + 1 / session.info.frameRate)
             } label: { Image(systemName: "forward.frame.fill") }
+                .keyboardShortcut(.rightArrow, modifiers: [])
+                .help("Next frame (→)")
             Text("\(timecode(session.playhead)) / \(timecode(session.info.duration))")
                 .font(.callout.monospacedDigit())
                 .foregroundStyle(.secondary)

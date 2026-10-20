@@ -25,9 +25,11 @@ struct MetadataEditor: View {
                         Text("Clean copies are saved next to the originals.").foregroundStyle(.secondary)
                     }
                 } else {
+                    // No form background of its own, so the stage shows evenly on both sides.
                     Form { formFields }
                         .formStyle(.grouped)
-                        .frame(maxWidth: 520)
+                        .scrollContentBackground(.hidden)
+                        .frame(maxWidth: 560)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -50,15 +52,15 @@ struct MetadataEditor: View {
         switch kind {
         case .image:
             Section("Description") {
-                TextField("Title", text: $image.title)
-                TextField("Author", text: $image.author)
-                TextField("Copyright", text: $image.copyright)
-                TextField("Comment", text: $image.comment)
+                TextField("Title", text: $image.title, prompt: Text("Not set"))
+                TextField("Author", text: $image.author, prompt: Text("Not set"))
+                TextField("Copyright", text: $image.copyright, prompt: Text("Not set"))
+                TextField("Comment", text: $image.comment, prompt: Text("Not set"))
                 TextField("Date taken", text: $image.date, prompt: Text("YYYY:MM:DD HH:MM:SS"))
             }
             Section("Location") {
-                TextField("Latitude", text: $image.latitude)
-                TextField("Longitude", text: $image.longitude)
+                TextField("Latitude", text: $image.latitude, prompt: Text("e.g. 47.2266"))
+                TextField("Longitude", text: $image.longitude, prompt: Text("e.g. 8.8184"))
                 Toggle("Remove location", isOn: $removeLocation)
             }
             if !image.camera.isEmpty {
@@ -67,13 +69,13 @@ struct MetadataEditor: View {
         case .pdf:
             Section("Document") {
                 ForEach(EditJobs.pdfKeys.map { $0.label }, id: \.self) { label in
-                    TextField(label, text: binding(label))
+                    TextField(label, text: binding(label), prompt: Text("Not set"))
                 }
             }
         default:
             Section("Tags") {
                 ForEach(MediaEdits.metadataKeys, id: \.self) { key in
-                    TextField(key.capitalized, text: binding(key))
+                    TextField(key.capitalized, text: binding(key), prompt: Text("Not set"))
                 }
             }
         }
@@ -269,8 +271,25 @@ enum Editors {
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { note in
             MainActor.assumeIsolated { windows.removeAll { $0 === note.object as? NSWindow } }
         }
+        showInDock(window)
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
+    }
+
+    private static var dockWindows: [NSWindow] = []
+
+    /// A menu bar app has no Dock icon, so a window hidden behind another app would be hard to find.
+    /// While any editor or Settings is open the app shows in the Dock and ⌘-Tab.
+    static func showInDock(_ window: NSWindow) {
+        guard !dockWindows.contains(where: { $0 === window }) else { return }
+        dockWindows.append(window)
+        NSApp.setActivationPolicy(.regular)
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { note in
+            MainActor.assumeIsolated {
+                dockWindows.removeAll { $0 === note.object as? NSWindow }
+                if dockWindows.isEmpty { NSApp.setActivationPolicy(.accessory) }
+            }
+        }
     }
 
     private static func view(for tool: Tool, kind: FileKind, context: EditorContext) -> AnyView? {

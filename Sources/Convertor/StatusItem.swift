@@ -124,6 +124,7 @@ enum SettingsWindow {
             window.center()
             self.window = window
         }
+        if let window { Editors.showInDock(window) }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
     }

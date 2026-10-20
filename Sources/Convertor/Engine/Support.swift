@@ -25,6 +25,14 @@ enum Output {
         return source.deletingLastPathComponent()
     }
 
+    /// Where results go, for the editors' footer: "Saved next to the original", "Saved to Downloads", …
+    static var destinationSummary: String {
+        let probe = URL(fileURLWithPath: "/nonexistent/file")
+        let folder = directory(for: probe)
+        if folder == probe.deletingLastPathComponent() { return "Saved next to the original" }
+        return "Saved to \(FileManager.default.displayName(atPath: folder.path))"
+    }
+
     /// File name without its extension; "x.tar.gz" becomes "x".
     static func baseName(_ url: URL) -> String {
         let name = url.lastPathComponent
